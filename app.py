@@ -6,10 +6,10 @@ import streamlit as st
 # НАСТРОЙКИ
 # =========================
 CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwA5g3ZuBmZlY3vQMbc7nautnpK7c4ioKtTYU_mTskZb6A6nJ_yeokKIvfbVBFH1jTPpzOgoBMD89n/pub?gid=372714191&single=true&output=csv"
+GERB_PATH = os.path.join("assets", "gerb.png")
 
-ASSETS_GERB = os.path.join("assets", "gerb.png")
-
-APP_TITLE = "Министерство восстановления, развития приграничья и строительства Курской области • Реестр объектов"
+MINISTRY_TITLE = "Министерство восстановления, развития приграничья и строительства Курской области"
+APP_TITLE = f"{MINISTRY_TITLE} • Реестр объектов"
 
 
 st.set_page_config(
@@ -19,60 +19,84 @@ st.set_page_config(
 )
 
 # =========================
-# CSS (ШАПКА + КАРТОЧКИ)
+# CSS (ШРИФТ + ШАПКА + UI)
 # =========================
 st.markdown(
     """
 <style>
-/* Общий фон */
-.block-container { padding-top: 28px; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
 
-/* Шапка */
-.header-wrap{
-  display:flex;
-  align-items:center;           /* герб по центру по высоте */
-  gap:18px;
-  background: linear-gradient(180deg, #314a86 0%, #2b3f73 100%);
-  border-radius: 18px;
-  padding: 22px 26px;           /* одинаковые отступы сверху/снизу */
-  box-shadow: 0 10px 22px rgba(16,24,40,0.15);
-  color: #fff;
-  margin-bottom: 18px;
+html, body, [class*="css"]  {
+  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
 }
-.header-gerb{
-  width:78px;
-  height:78px;
+
+.block-container { padding-top: 22px; }
+
+/* ---------- ШАПКА ---------- */
+.hero{
+  background: linear-gradient(180deg, #2f4b8a 0%, #263e73 100%);
+  border-radius: 18px;
+  padding: 18px 22px;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.14);
+  margin-bottom: 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.hero-inner{
+  display:flex;
+  align-items:center;     /* вертикально ровно */
+  gap:16px;
+}
+
+.gerb-box{
+  width:74px;
+  height:74px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.16);
   display:flex;
   align-items:center;
   justify-content:center;
-  flex: 0 0 78px;
+  flex: 0 0 74px;
 }
-.header-gerb img{
-  max-width:78px;
-  max-height:78px;
-}
-.header-title{
-  font-size: 34px;
-  font-weight: 800;
-  line-height: 1.15;
+
+.title-top{
+  color: rgba(255,255,255,0.92);
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.25;
   margin: 0;
 }
-.header-sub{
-  margin-top: 6px;
-  opacity: 0.92;
-  font-size: 14px;
+
+.title-main{
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 32px;
+  line-height: 1.12;
+  margin: 6px 0 0 0;
+  letter-spacing: -0.2px;
 }
+
+.subtitle{
+  color: rgba(255,255,255,0.86);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
 .badge{
-  display:inline-block;
-  margin-top:10px;
-  padding:6px 10px;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  margin-top: 10px;
+  padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.92);
   font-size: 12px;
 }
 
-/* Карточки */
+/* ---------- Карточки ---------- */
 .card{
   background:#fff;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -81,23 +105,27 @@ st.markdown(
   box-shadow: 0 10px 20px rgba(15,23,42,0.06);
   margin-bottom: 14px;
 }
+
 .card-title{
   font-size: 18px;
   font-weight: 800;
-  margin: 0 0 6px 0;
+  margin: 0 0 8px 0;
   color: #0f172a;
 }
+
 .meta{
-  color: rgba(15,23,42,0.75);
+  color: rgba(15,23,42,0.78);
   font-size: 13px;
-  margin: 2px 0;
+  margin: 3px 0;
 }
+
 .pills{
   display:flex;
   gap:8px;
   flex-wrap:wrap;
   margin: 10px 0 10px 0;
 }
+
 .pill{
   border-radius: 999px;
   padding: 6px 10px;
@@ -105,82 +133,76 @@ st.markdown(
   border: 1px solid rgba(15,23,42,0.12);
   background: rgba(15,23,42,0.03);
 }
+
 .pill-ok{ background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.25); }
 .pill-warn{ background: rgba(245,158,11,0.14); border-color: rgba(245,158,11,0.30); }
+.pill-bad{ background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.26); }
 .pill-neutral{ background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.22); }
 
-.card-actions{
-  display:flex;
-  gap:10px;
-  margin-top: 10px;
-}
-
+/* Фото */
 .photo{
   border-radius: 14px;
   overflow:hidden;
   border: 1px solid rgba(15,23,42,0.08);
   margin: 10px 0 10px 0;
 }
-.small-note{ font-size:12px; opacity: 0.75; }
 
+/* Чуть красивее поля */
+label { font-weight: 600 !important; }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 # =========================
-# ЗАГРУЗКА ДАННЫХ
+# ДАННЫЕ
 # =========================
 @st.cache_data(ttl=300)
 def load_data(csv_url: str) -> pd.DataFrame:
     df = pd.read_csv(csv_url)
-
-    # Нормализуем колонки (на всякий случай)
     df.columns = [c.strip() for c in df.columns]
 
-    # Приведем типы/пустоты
-    for col in ["sector", "district", "name", "responsible", "status", "work_flag", "address", "card_url", "folder_url"]:
+    # ожидаемые поля (если где-то пусто — будет просто "")
+    cols = ["sector", "district", "name", "responsible", "status", "work_flag", "address", "card_url", "folder_url"]
+    for col in cols:
         if col in df.columns:
             df[col] = df[col].astype(str).replace({"nan": "", "None": ""}).fillna("")
 
-    # Если есть фото (опционально)
+    # опционально: фото
     if "photo_url" in df.columns:
         df["photo_url"] = df["photo_url"].astype(str).replace({"nan": "", "None": ""}).fillna("")
 
     return df
 
 
-def nice_value(v: str, default="—") -> str:
+def nice(v: str, default="—") -> str:
     v = (v or "").strip()
     return v if v else default
 
 
 def district_sort_key(x: str):
-    """г. Курск первым, Курский район вторым, далее по алфавиту."""
     s = (x or "").strip().lower()
-
-    # максимально мягко ловим варианты
     if s in ["г. курск", "курск", "г курск", "город курск"]:
         return (0, "курск")
     if s in ["курский район", "курский р-н", "курский рн", "курский"]:
         return (1, "курский район")
-
     return (2, s)
 
 
-def pill_class_status(status: str) -> str:
+def pill_for_status(status: str) -> str:
     s = (status or "").strip().lower()
     if not s:
-        return "pill"
-    # можно расширять под ваши статусы
-    if "в работе" in s or "строит" in s or "идут" in s:
-        return "pill pill-ok"
-    if "проблем" in s or "риск" in s or "срыв" in s:
+        return "pill pill-neutral"
+    if any(w in s for w in ["риск", "проблем", "срыв", "отстав"]):
         return "pill pill-warn"
+    if any(w in s for w in ["заверш", "выполн", "готов", "сдан"]):
+        return "pill pill-ok"
+    if any(w in s for w in ["останов", "заморож", "не начат"]):
+        return "pill pill-bad"
     return "pill pill-neutral"
 
 
-def pill_class_workflag(work_flag: str) -> str:
+def pill_for_workflag(work_flag: str) -> str:
     s = (work_flag or "").strip().lower()
     if s in ["да", "есть", "ведутся", "true", "1"]:
         return "pill pill-ok"
@@ -192,33 +214,30 @@ def pill_class_workflag(work_flag: str) -> str:
 df = load_data(CSV_URL)
 
 # =========================
-# ШАПКА
+# ШАПКА (ГЕРБ + 2 строки)
 # =========================
-gerb_html = ""
-if os.path.exists(ASSETS_GERB):
-    # показываем герб из репозитория
-    gerb_html = f'<div class="header-gerb"><img src="app/static?file={ASSETS_GERB}" /></div>'
-    # В Streamlit Cloud "src=..." напрямую из файлов не всегда работает.
-    # Поэтому ниже мы продублируем st.image рядом (надежнее).
-else:
-    gerb_html = '<div class="header-gerb"></div>'
+left, right = st.columns([1.2, 12])
 
-# Надежный способ показать герб: st.columns + st.image
-c1, c2 = st.columns([1, 12])
-with c1:
-    if os.path.exists(ASSETS_GERB):
-        st.image(ASSETS_GERB, width=70)
+with left:
+    # герб строго внутри шапки: если файла нет — покажем заглушку
+    if os.path.exists(GERB_PATH):
+        st.markdown('<div class="gerb-box">', unsafe_allow_html=True)
+        st.image(GERB_PATH, width=52)
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.write("")  # если нет файла — просто пусто
+        st.markdown('<div class="gerb-box" title="Файл не найден: assets/gerb.png">🏛️</div>', unsafe_allow_html=True)
 
-with c2:
+with right:
     st.markdown(
         f"""
-        <div class="header-wrap">
-          <div style="flex:1;">
-            <div class="header-title">{APP_TITLE}</div>
-            <div class="header-sub">Единый список объектов 2025–2028 с фильтрами и переходом в карточку/папку.</div>
-            <div class="badge">Источник данных: Google Sheets (CSV)</div>
+        <div class="hero">
+          <div class="hero-inner">
+            <div style="flex:1;">
+              <div class="title-top">{MINISTRY_TITLE}</div>
+              <div class="title-main">Реестр объектов</div>
+              <div class="subtitle">Единый список объектов 2025–2028 с фильтрами и переходом в карточку/папку.</div>
+              <div class="badge">📎 Источник данных: Google Sheets (CSV)</div>
+            </div>
           </div>
         </div>
         """,
@@ -226,26 +245,28 @@ with c2:
     )
 
 # =========================
-# ФИЛЬТРЫ
+# ФИЛЬТРЫ (с иконками)
 # =========================
-left, mid, right = st.columns(3)
+f1, f2, f3 = st.columns(3)
 
-sectors = sorted([s for s in df["sector"].unique().tolist() if s.strip()])
-districts = sorted([d for d in df["district"].unique().tolist() if d.strip()], key=district_sort_key)
-statuses = sorted([s for s in df["status"].unique().tolist() if s.strip()])
+sectors = sorted([s for s in df.get("sector", pd.Series([])).unique().tolist() if str(s).strip()])
+districts = sorted([d for d in df.get("district", pd.Series([])).unique().tolist() if str(d).strip()], key=district_sort_key)
+statuses = sorted([s for s in df.get("status", pd.Series([])).unique().tolist() if str(s).strip()])
 
-with left:
-    sector_sel = st.selectbox("Отрасль", options=["Все"] + sectors, index=0)
+with f1:
+    sector_sel = st.selectbox("🏷️ Отрасль", options=["Все"] + sectors, index=0)
 
-with mid:
-    district_sel = st.selectbox("Район", options=["Все"] + districts, index=0)
+with f2:
+    district_sel = st.selectbox("📍 Район", options=["Все"] + districts, index=0)
 
-with right:
-    status_sel = st.selectbox("Статус", options=["Все"] + statuses, index=0)
+with f3:
+    status_sel = st.selectbox("⚑ Статус", options=["Все"] + statuses, index=0)
 
-q = st.text_input("Поиск (наименование / адрес / ответственный)", value="").strip().lower()
+q = st.text_input("🔎 Поиск (наименование / адрес / ответственный)", value="").strip().lower()
 
-# Применяем фильтры
+# =========================
+# ФИЛЬТРАЦИЯ
+# =========================
 filtered = df.copy()
 
 if sector_sel != "Все":
@@ -265,62 +286,57 @@ if q:
             str(row.get("responsible", "")),
         ]).lower()
         return q in hay
-
     filtered = filtered[filtered.apply(match_row, axis=1)]
 
 st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
-
 st.divider()
 
 # =========================
-# ВЫВОД КАРТОЧЕК (2 в ряд)
+# КАРТОЧКИ (2 в ряд)
 # =========================
 rows = filtered.to_dict(orient="records")
 
 def render_card(rec: dict):
-    name = nice_value(rec.get("name", ""))
-    sector = nice_value(rec.get("sector", ""))
-    district = nice_value(rec.get("district", ""))
-    address = nice_value(rec.get("address", ""))
-    responsible = nice_value(rec.get("responsible", ""))
+    name = nice(rec.get("name", ""))
+    sector = nice(rec.get("sector", ""))
+    district = nice(rec.get("district", ""))
+    address = nice(rec.get("address", ""))
+    responsible = nice(rec.get("responsible", ""))
     status = (rec.get("status", "") or "").strip()
     work_flag = (rec.get("work_flag", "") or "").strip()
 
     card_url = (rec.get("card_url", "") or "").strip()
     folder_url = (rec.get("folder_url", "") or "").strip()
-
     photo_url = (rec.get("photo_url", "") or "").strip() if "photo_url" in rec else ""
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
 
-    # ВАЖНО: ID НЕ ПОКАЗЫВАЕМ — только название
+    # ID НЕ ПОКАЗЫВАЕМ — только название
     st.markdown(f'<div class="card-title">{name}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="meta"><b>Отрасль:</b> {sector}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="meta"><b>Район:</b> {district}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="meta"><b>Адрес:</b> {address}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="meta"><b>Ответственный:</b> {responsible}</div>', unsafe_allow_html=True)
 
-    # Плашки
+    st.markdown(f'<div class="meta">🏷️ <b>Отрасль:</b> {sector}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="meta">📍 <b>Район:</b> {district}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="meta">🗺️ <b>Адрес:</b> {address}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="meta">👤 <b>Ответственный:</b> {responsible}</div>', unsafe_allow_html=True)
+
     st.markdown(
         f"""
         <div class="pills">
-          <div class="{pill_class_status(status)}">Статус: {nice_value(status, "—")}</div>
-          <div class="{pill_class_workflag(work_flag)}">Работы: {nice_value(work_flag, "—")}</div>
+          <div class="{pill_for_status(status)}">⚑ Статус: {nice(status, "—")}</div>
+          <div class="{pill_for_workflag(work_flag)}">🛠️ Работы: {nice(work_flag, "—")}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Фото (если будет колонка photo_url и она заполнена)
     if photo_url:
         try:
             st.markdown('<div class="photo">', unsafe_allow_html=True)
             st.image(photo_url, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
         except Exception:
-            st.caption("Фото не удалось загрузить (проверь ссылку photo_url).")
+            st.caption("Фото не удалось загрузить — проверь ссылку в photo_url.")
 
-    # Кнопки
     b1, b2 = st.columns(2)
     with b1:
         if card_url:
@@ -336,13 +352,11 @@ def render_card(rec: dict):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-
-# Рендерим 2 карточки в строку
 for i in range(0, len(rows), 2):
-    col_a, col_b = st.columns(2)
-    with col_a:
+    c1, c2 = st.columns(2)
+    with c1:
         render_card(rows[i])
-    with col_b:
+    with c2:
         if i + 1 < len(rows):
             render_card(rows[i + 1])
         else:
