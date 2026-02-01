@@ -1,416 +1,454 @@
-# app.py
-# -*- coding: utf-8 -*-
-import os
-import html
 import base64
+import html
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
+
 # =========================
-# НАСТРОЙКИ (ПРИ НЕОБХОДИМОСТИ МЕНЯТЬ ТОЛЬКО ТУТ)
+# НАСТРОЙКИ
 # =========================
 CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwA5g3ZuBmZlY3vQMbc7nautnpK7c4ioKtTYU_mTskZb6A6nJ_yeokKIvfbVBFH1jTPpzOgoBMD89n/pub?gid=372714191&single=true&output=csv"
+GERB_PATH = Path("assets/gerb.png")
 
-TITLE_MINISTRY = "Министерство восстановления, развития приграничья и строительства Курской области"
-TITLE_APP = "Реестр объектов"
+MINISTRY_NAME = "Министерство восстановления, развития приграничья и строительства Курской области"
+APP_NAME = "Реестр объектов"
 SUBTITLE = "Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку."
+DATA_PILL = "Источник данных: Google Sheets (CSV)"
 
-# Положите герб рядом с app.py (или в assets/). Название файла должно совпадать.
-GERB_PATH = "gerb.png"
-
-# Приоритет района
-DISTRICT_PRIORITY = ["г. Курск", "Курский"]
-
-st.set_page_config(
-    page_title="Реестр объектов — Курская область",
-    page_icon="🏛️",
-    layout="wide"
-)
 
 # =========================
-# HELPERS
+# УТИЛИТЫ
 # =========================
-def _norm(x) -> str:
+def b64_image(path: Path) -> str:
+    """Return data URI for an image. Empty string if file not found."""
+    try:
+        data = path.read_bytes()
+        return "data:image/png;base64," + base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return ""
+
+
+def norm_str(x) -> str:
+    """Normalize any value to safe display string."""
     if x is None:
-        return ""
-    if isinstance(x, float) and pd.isna(x):
-        return ""
-    return str(x).strip()
+        return "—"
+    try:
+        if pd.isna(x):
+            return "—"
+    except Exception:
+        pass
+    s = str(x).strip()
+    return s if s else "—"
 
-def _safe(x) -> str:
-    """Экранируем текст, чтобы НИ ОДНА строка из CSV не могла сломать HTML."""
-    return html.escape(_norm(x), quote=True)
 
-def _clean_url(x: str) -> str:
-    x = _norm(x)
-    return x if x.lower().startswith("http") else ""
+def esc(x) -> str:
+    """HTML-escape normalized string."""
+    return html.escape(norm_str(x), quote=True)
 
-def _district_sort_key(name: str):
-    name = _norm(name)
-    if not name:
-        return (9, "")
-    if name == DISTRICT_PRIORITY[0]:
-        return (0, name)
-    if name == DISTRICT_PRIORITY[1]:
-        return (1, name)
-    return (2, name.lower())
 
-def _img_to_b64(path: str) -> str:
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+def priority_sort_district(values: list[str]) -> list[str]:
+    """
+    Районы: г. Курск первым, затем Курский район, далее по алфавиту.
+    (сохраняем остальные как есть, но сортируем стабильно)
+    """
+    cleaned = [v for v in values if v and v != "—"]
+    uniq = sorted(set(cleaned), key=lambda s: s.lower())
 
-@st.cache_data(ttl=300, show_spinner=False)
+    # варианты написания (на всякий)
+    kursk_city_keys = {"г. курск", "город курск", "курск", "г курск"}
+    kursk_raion_keys = {"курский", "курский район", "курский р-н", "курский р-он"}
+
+    def is_kursk_city(s: str) -> bool:
+        t = s.strip().lower()
+        return t in kursk_city_keys or t.startswith("г. курск") or t == "г курск"
+
+    def is_kursk_raion(s: str) -> bool:
+        t = s.strip().lower()
+        return t in kursk_raion_keys or t.startswith("курский район") or t.startswith("курский")
+
+    kursk_city = [x for x in uniq if is_kursk_city(x)]
+    kursk_raion = [x for x in uniq if (not is_kursk_city(x)) and is_kursk_raion(x)]
+    rest = [x for x in uniq if (x not in kursk_city) and (x not in kursk_raion)]
+
+    return kursk_city + kursk_raion + rest
+
+
+@st.cache_data(show_spinner=False, ttl=300)
 def load_data(url: str) -> pd.DataFrame:
     df = pd.read_csv(url)
-    df.columns = [c.strip().lower() for c in df.columns]
 
-    needed = ["id","sector","district","name","responsible","status","work_flag","address","card_url","folder_url"]
+    # Приводим к ожидаемым названиям (у вас они уже такие, но на всякий случай)
+    rename_map = {
+        "sector": "sector",
+        "district": "district",
+        "name": "name",
+        "responsible": "responsible",
+        "status": "status",
+        "work_flag": "work_flag",
+        "address": "address",
+        "card_url": "card_url",
+        "folder_url": "folder_url",
+        "id": "id",
+    }
+    df = df.rename(columns={c: rename_map.get(c, c) for c in df.columns})
+
+    # Убедимся что все ключевые колонки есть
+    needed = ["sector", "district", "name", "responsible", "status", "work_flag", "address", "card_url", "folder_url", "id"]
     for col in needed:
         if col not in df.columns:
             df[col] = ""
 
-    for col in df.columns:
-        df[col] = df[col].apply(_norm)
-
-    df["card_url"] = df["card_url"].apply(_clean_url)
-    df["folder_url"] = df["folder_url"].apply(_clean_url)
-
-    df["status"] = df["status"].replace("", "—")
-    df["work_flag"] = df["work_flag"].replace("", "—")
+    # Строки
+    for col in needed:
+        df[col] = df[col].astype(str)
 
     return df
 
 
 # =========================
-# СТИЛИ (ВАЖНО: ЭТО НЕ ЛОМАЕТСЯ И НЕ "РЕЖЕТСЯ")
+# PAGE
 # =========================
-CSS = """
+st.set_page_config(
+    page_title=f"{APP_NAME} — Курская область",
+    page_icon="📋",
+    layout="wide",
+)
+
+gerb_data_uri = b64_image(GERB_PATH)
+
+# =========================
+# CSS (делаем шапку НЕ обрезанной)
+# =========================
+st.markdown(
+    f"""
 <style>
-.block-container { padding-top: 14px; padding-bottom: 30px; }
-.stApp { background: #f3f6fb; }
-header[data-testid="stHeader"] { background: transparent; }
-div[data-testid="stToolbar"] { right: 10px; }
+/* Сужаем “контентную колонку”, чтобы смотрелось как у вас “красиво” */
+.block-container {{
+    padding-top: 1.2rem;
+    padding-bottom: 2rem;
+    max-width: 1200px;
+}}
 
-/* ШАПКА на всю ширину — без обрезаний */
-.hero-bleed{
+:root {{
+  --hero-bg1: #1d2f5a;
+  --hero-bg2: #132a4f;
+  --hero-accent: rgba(255,255,255,0.08);
+  --card-muted: rgba(0,0,0,0.045);
+  --border: rgba(0,0,0,0.08);
+}}
+
+.hero {{
   position: relative;
-  left: 50%;
-  margin-left: -50vw;
-  width: 100vw;
-  padding: 18px 0 14px 0;
-}
-
-.hero-inner{
-  max-width: 1320px;
-  margin: 0 auto;
-  padding: 0 18px;
-}
-
-.hero{
-  width: 100%;
-  border-radius: 22px;
-  padding: 22px 24px;
-  background:
-    radial-gradient(1000px 520px at 10% 0%, rgba(255,255,255,0.12), rgba(255,255,255,0) 60%),
-    linear-gradient(135deg, #1f3b7a 0%, #233c7a 35%, #1c2f63 100%);
-  box-shadow: 0 14px 30px rgba(0,0,0,0.18);
-  color: #fff;
-  position: relative;
-  overflow: hidden;
-}
-
-.hero:after{
-  content:"";
-  position:absolute;
-  right:-160px; top:-170px;
-  width:780px; height:580px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.14), rgba(255,255,255,0));
-  transform: rotate(18deg);
-  border-radius: 52px;
-}
-
-.hero-grid{
-  position: relative;
-  display:flex;
-  gap:18px;
-  align-items:center;
-}
-
-.hero-logo{
-  width:102px; height:102px;
+  overflow: hidden;          /* чтобы декоративные слои не вылезали */
   border-radius: 18px;
+  padding: 22px 22px;
+  background: linear-gradient(180deg, var(--hero-bg1), var(--hero-bg2));
+  box-shadow: 0 18px 35px rgba(0,0,0,0.18);
+  border: 1px solid rgba(255,255,255,0.10);
+  margin-bottom: 16px;
+}}
+
+.hero:before {{
+  content: "";
+  position: absolute;
+  inset: -120px -100px auto auto;
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle, rgba(255,255,255,0.14), rgba(255,255,255,0.02), rgba(255,255,255,0));
+  transform: rotate(18deg);
+}}
+
+.hero:after {{
+  content: "";
+  position: absolute;
+  right: -120px;
+  bottom: -140px;
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle, rgba(255,255,255,0.10), rgba(255,255,255,0.02), rgba(255,255,255,0));
+}}
+
+.hero-inner {{
+  position: relative;
+  display: grid;
+  grid-template-columns: 86px 1fr;
+  gap: 16px;
+  align-items: center;
+}}
+
+.hero-logo {{
+  width: 76px;
+  height: 76px;
+  border-radius: 14px;
   background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.18);
-  display:flex; align-items:center; justify-content:center;
-  flex: 0 0 auto;
-  overflow:hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
-}
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);
+}}
 
-.hero-logo img{ width:82px; height:82px; object-fit:contain; }
+.hero-logo img {{
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,0.25));
+}}
 
-.hero-titles{ display:flex; flex-direction:column; gap:6px; min-width: 0; }
-.hero-ministry{
-  font-size: 30px;
-  font-weight: 900;
-  line-height: 1.12;
-  opacity: 0.98;
-}
-.hero-app{
-  font-size: 42px;
-  font-weight: 900;
-  line-height: 1.04;
-  letter-spacing: 0.2px;
-}
-.hero-sub{
-  font-size: 13.5px;
-  opacity: 0.92;
-  max-width: 980px;
-}
-.pill{
-  display:inline-flex; align-items:center; gap:8px;
-  margin-top: 10px;
-  font-size: 12px;
+.hero-ministry {{
+  color: rgba(255,255,255,0.95);
+  font-size: 22px;         /* министерство крупнее */
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 0 0 6px 0;
+}}
+
+.hero-app {{
+  color: rgba(255,255,255,0.98);
+  font-size: 20px;         /* реестр меньше министерства */
+  font-weight: 700;
+  margin: 0 0 8px 0;
+}}
+
+.hero-sub {{
+  color: rgba(255,255,255,0.85);
+  font-size: 13px;
+  margin: 0 0 10px 0;
+}}
+
+.hero-pill {{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.18);
   background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.92);
+  font-size: 12px;
   width: fit-content;
-}
+}}
 
-/* Блок фильтров */
-.filters-card {
-  background: rgba(255,255,255,0.62);
-  border: 1px solid rgba(0,0,0,0.06);
-  border-radius: 16px;
-  padding: 12px 14px;
-}
+.filters-wrap {{
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.015);
+  margin-bottom: 10px;
+}}
 
-/* Карточки */
-.obj-card {
-  background: #ffffff;
-  border: 1px solid rgba(0,0,0,0.06);
+.card {{
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 14px 14px 12px 14px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.05);
-}
+  background: white;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+}}
 
-.obj-title{
+.card h3 {{
   font-size: 16px;
-  font-weight: 800;
-  line-height: 1.2;
-  margin-bottom: 10px;
-}
+  margin: 0 0 10px 0;
+}}
 
-.meta-box{
-  background: #f4f7fb;
-  border: 1px solid rgba(0,0,0,0.06);
+.meta {{
+  border: 1px solid var(--border);
+  background: var(--card-muted);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 10px 10px;
   margin-bottom: 10px;
-}
+}}
 
-.meta-row{
-  display:flex;
-  gap:10px;
-  align-items:flex-start;
+.meta-row {{
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
   margin: 4px 0;
-  font-size: 13px;
-  color: #0f172a;
-}
+  color: rgba(0,0,0,0.76);
+  font-size: 12.8px;
+}}
 
-.meta-ico{ width: 18px; text-align:center; opacity: 0.95; }
-.meta-key{ font-weight: 700; margin-right: 6px; }
+.meta-ico {{
+  width: 18px;
+  text-align: center;
+  opacity: 0.95;
+}}
 
-.badge{
+.chips {{
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px 0;
+}}
+
+.chip {{
   display:inline-flex;
   align-items:center;
-  gap:8px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 5px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(15,23,42,0.10);
-  background: #ffffff;
   font-size: 12px;
-  margin-right: 8px;
-}
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(0,0,0,0.02);
+}}
 
-div.stButton>button, a[role="button"]{
-  border-radius: 12px !important;
-}
+.small-muted {{
+  color: rgba(0,0,0,0.55);
+  font-size: 12px;
+}}
+
 </style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
-
-
-# =========================
-# ШАПКА (ВАЖНО: ТОЛЬКО unsafe_allow_html=True)
-# =========================
-def render_header():
-    logo_html = ""
-    try:
-        if GERB_PATH and os.path.exists(GERB_PATH):
-            b64 = _img_to_b64(GERB_PATH)
-            logo_html = f'<div class="hero-logo"><img src="data:image/png;base64,{b64}" alt="Герб"/></div>'
-    except Exception:
-        logo_html = ""
-
-    hero_html = (
-        f'<div class="hero-bleed">'
-        f'  <div class="hero-inner">'
-        f'    <div class="hero">'
-        f'      <div class="hero-grid">'
-        f'        {logo_html}'
-        f'        <div class="hero-titles">'
-        f'          <div class="hero-ministry">{_safe(TITLE_MINISTRY)}</div>'
-        f'          <div class="hero-app">{_safe(TITLE_APP)}</div>'
-        f'          <div class="hero-sub">{_safe(SUBTITLE)}</div>'
-        f'          <div class="pill">🧾 Источник данных: Google Sheets (CSV)</div>'
-        f'        </div>'
-        f'      </div>'
-        f'    </div>'
-        f'  </div>'
-        f'</div>'
-    )
-
-    # ВАЖНО: ТОЛЬКО так. НИКАКИХ st.code/st.write для hero_html!
-    st.markdown(hero_html, unsafe_allow_html=True)
-
-render_header()
-
+""",
+    unsafe_allow_html=True,
+)
 
 # =========================
-# ДАННЫЕ
+# HEADER
+# =========================
+logo_html = ""
+if gerb_data_uri:
+    logo_html = f'<div class="hero-logo"><img src="{gerb_data_uri}" alt="Герб" /></div>'
+else:
+    # Если вдруг файла нет — показываем заглушку, чтобы ничего не ломалось
+    logo_html = '<div class="hero-logo">🏛️</div>'
+
+st.markdown(
+    f"""
+<div class="hero">
+  <div class="hero-inner">
+    {logo_html}
+    <div>
+      <div class="hero-ministry">{html.escape(MINISTRY_NAME)}</div>
+      <div class="hero-app">{html.escape(APP_NAME)}</div>
+      <div class="hero-sub">{html.escape(SUBTITLE)}</div>
+      <div class="hero-pill">📄 {html.escape(DATA_PILL)}</div>
+    </div>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+# =========================
+# DATA
 # =========================
 df = load_data(CSV_URL)
 
-sectors = sorted([x for x in df["sector"].unique() if x], key=lambda s: s.lower())
-districts = sorted([x for x in df["district"].unique() if x], key=_district_sort_key)
-statuses = sorted([x for x in df["status"].unique() if x], key=lambda s: s.lower())
-
+# Подготовим варианты фильтров
+sector_vals = sorted(set([norm_str(x) for x in df["sector"].tolist() if norm_str(x) != "—"]), key=lambda s: s.lower())
+district_vals = priority_sort_district([norm_str(x) for x in df["district"].tolist()])
+status_vals = sorted(set([norm_str(x) for x in df["status"].tolist() if norm_str(x) != "—"]), key=lambda s: s.lower())
 
 # =========================
-# ФИЛЬТРЫ
+# FILTERS
 # =========================
-st.markdown('<div class="filters-card">', unsafe_allow_html=True)
-
+st.markdown('<div class="filters-wrap">', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
+
 with c1:
-    sector_sel = st.selectbox("🏷️ Отрасль", ["Все"] + sectors, index=0)
+    sector = st.selectbox("🏷️ Отрасль", ["Все"] + sector_vals, index=0)
 with c2:
-    district_sel = st.selectbox("📍 Район", ["Все"] + districts, index=0)
+    district = st.selectbox("📍 Район", ["Все"] + district_vals, index=0)
 with c3:
-    status_sel = st.selectbox("📌 Статус", ["Все"] + statuses, index=0)
+    status = st.selectbox("📌 Статус", ["Все"] + status_vals, index=0)
 
-q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="").strip()
+q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="").strip().lower()
+st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
-
-
-# =========================
-# ФИЛЬТРАЦИЯ
-# =========================
+# Применяем фильтры
 f = df.copy()
 
-if sector_sel != "Все":
-    f = f[f["sector"] == sector_sel]
-if district_sel != "Все":
-    f = f[f["district"] == district_sel]
-if status_sel != "Все":
-    f = f[f["status"] == status_sel]
-if q:
-    qq = q.lower()
-    f = f[
-        f["name"].str.lower().str.contains(qq, na=False)
-        | f["address"].str.lower().str.contains(qq, na=False)
-        | f["responsible"].str.lower().str.contains(qq, na=False)
-        | f["id"].str.lower().str.contains(qq, na=False)
-    ]
+if sector != "Все":
+    f = f[f["sector"].astype(str).str.strip() == sector]
+if district != "Все":
+    f = f[f["district"].astype(str).str.strip() == district]
+if status != "Все":
+    f = f[f["status"].astype(str).str.strip() == status]
 
-st.caption(f"Показано объектов: **{len(f)}** из **{len(df)}**")
+if q:
+    def row_match(row) -> bool:
+        hay = " ".join(
+            [
+                str(row.get("id", "")),
+                str(row.get("name", "")),
+                str(row.get("address", "")),
+                str(row.get("responsible", "")),
+            ]
+        ).lower()
+        return q in hay
+
+    f = f[f.apply(row_match, axis=1)]
+
+st.markdown(f'<div class="small-muted">Показано объектов: {len(f)} из {len(df)}</div>', unsafe_allow_html=True)
 st.divider()
 
-
 # =========================
-# ОТРИСОВКА КАРТОЧЕК (НЕ ЛОМАЕТСЯ НА ОДНОЙ СТРОКЕ)
+# RENDER CARD
 # =========================
 def render_card(row: pd.Series):
-    name = _safe(row.get("name", ""))
-    sector = _safe(row.get("sector", "—"))
-    district = _safe(row.get("district", "—"))
-    address = _safe(row.get("address", "—"))
-    responsible = _safe(row.get("responsible", "—"))
-    status = _safe(row.get("status", "—"))
-    work_flag = _safe(row.get("work_flag", "—"))
+    # ПОЛЯ
+    name = esc(row.get("name"))
+    sector_v = esc(row.get("sector"))
+    district_v = esc(row.get("district"))
+    address_v = esc(row.get("address"))
+    responsible_v = esc(row.get("responsible"))
 
-    card_url = _clean_url(row.get("card_url", ""))
-    folder_url = _clean_url(row.get("folder_url", ""))
+    status_v = norm_str(row.get("status"))
+    work_v = norm_str(row.get("work_flag"))
+
+    card_url = norm_str(row.get("card_url"))
+    folder_url = norm_str(row.get("folder_url"))
+
+    # CHIPS
+    status_chip = html.escape(status_v if status_v != "—" else "—")
+    work_chip = html.escape(work_v if work_v != "—" else "—")
 
     st.markdown(
         f"""
-        <div class="obj-card">
-          <div class="obj-title">{name}</div>
+<div class="card">
+  <h3>{name}</h3>
 
-          <div class="meta-box">
-            <div class="meta-row"><span class="meta-ico">🏷️</span><span><span class="meta-key">Отрасль:</span>{sector}</span></div>
-            <div class="meta-row"><span class="meta-ico">📍</span><span><span class="meta-key">Район:</span>{district}</span></div>
-            <div class="meta-row"><span class="meta-ico">🗺️</span><span><span class="meta-key">Адрес:</span>{address}</span></div>
-            <div class="meta-row"><span class="meta-ico">👤</span><span><span class="meta-key">Ответственный:</span>{responsible}</span></div>
-          </div>
+  <div class="meta">
+    <div class="meta-row"><span class="meta-ico">🏷️</span><span><b>Отрасль:</b> {sector_v}</span></div>
+    <div class="meta-row"><span class="meta-ico">📍</span><span><b>Район:</b> {district_v}</span></div>
+    <div class="meta-row"><span class="meta-ico">🗺️</span><span><b>Адрес:</b> {address_v}</span></div>
+    <div class="meta-row"><span class="meta-ico">👤</span><span><b>Ответственный:</b> {responsible_v}</span></div>
+  </div>
 
-          <div style="margin: 6px 0 10px 0;">
-            <span class="badge">📌 <b>Статус:</b> {status}</span>
-            <span class="badge">🛠️ <b>Работы:</b> {work_flag}</span>
-          </div>
-        </div>
-        """,
+  <div class="chips">
+    <div class="chip">📌 <b>Статус:</b> {status_chip}</div>
+    <div class="chip">🛠️ <b>Работы:</b> {work_chip}</div>
+  </div>
+</div>
+""",
         unsafe_allow_html=True,
     )
 
+    # КНОПКИ — под карточкой
     b1, b2 = st.columns(2)
     with b1:
-        if card_url:
+        if card_url != "—" and card_url.startswith("http"):
             st.link_button("📄 Открыть карточку", card_url, use_container_width=True)
         else:
             st.button("📄 Открыть карточку", use_container_width=True, disabled=True)
     with b2:
-        if folder_url:
+        if folder_url != "—" and folder_url.startswith("http"):
             st.link_button("📁 Открыть папку", folder_url, use_container_width=True)
         else:
             st.button("📁 Открыть папку", use_container_width=True, disabled=True)
 
 
-# Стабильная сортировка: район (приоритет) → название
-f2 = f.copy()
-f2["_dk"] = f2["district"].apply(_district_sort_key)
-f2["_nk"] = f2["name"].str.lower()
-f2 = f2.sort_values(by=["_dk", "_nk"], ascending=True).drop(columns=["_dk", "_nk"])
-
-cols = st.columns(2)
-i = 0
-for _, row in f2.iterrows():
-    with cols[i % 2]:
-        try:
-            render_card(row)
-        except Exception:
-            # Даже если одна строка совсем плохая — приложение не ломаем
-            st.error("⚠️ Карточка не отрисовалась из-за некорректных данных в строке.")
-            st.write({"id": row.get("id", ""), "name": row.get("name", "")})
-    i += 1
-
-
 # =========================
-# БЭКАП (ПОДСКАЗКА)
+# GRID (2 колонки)
 # =========================
-with st.expander("🧷 Как сделать бэкап (чтобы откатиться за минуту)", expanded=False):
-    st.markdown(
-        """
-**Лучший способ — бэкап через GitHub ветку:**
-
-1) Откройте GitHub → репозиторий `kursk-registry` → вкладка **Code**  
-2) Слева сверху нажмите на список веток (обычно написано **main**)  
-3) Введите имя: `backup-ideal-01`  
-4) Нажмите **Create branch: backup-ideal-01 from main**
-
-Теперь это “сейв”. Если что-то сломали — просто возвращаемся к этой ветке.
-        """.strip()
-    )
+rows = f.to_dict(orient="records")
+for i in range(0, len(rows), 2):
+    col_left, col_right = st.columns(2)
+    with col_left:
+        render_card(pd.Series(rows[i]))
+    with col_right:
+        if i + 1 < len(rows):
+            render_card(pd.Series(rows[i + 1]))
+        else:
+            st.empty()
