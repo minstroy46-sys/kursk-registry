@@ -1,95 +1,140 @@
+# app.py
+# -*- coding: utf-8 -*-
+
+import base64
 import html
+import os
+from io import BytesIO
+
 import pandas as pd
+import requests
 import streamlit as st
 
+
 # =========================
-# НАСТРОЙКИ
+# НАСТРОЙКИ (ПРОВЕРЬТЕ ЭТО)
 # =========================
-st.set_page_config(
-    page_title="Министерство восстановления, развития приграничья и строительства Курской области • Реестр объектов",
-    page_icon="🏛️",
-    layout="wide",
-)
 
 CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwA5g3ZuBmZlY3vQMbc7nautnpK7c4ioKtTYU_mTskZb6A6nJ_yeokKIvfbVBFH1jTPpzOgoBMD89n/pub?gid=372714191&single=true&output=csv"
+
+# Герб: положите файл в репо рядом с app.py
+GERB_PATH = "gerb.png"
 
 TITLE_MINISTRY = "Министерство восстановления, развития приграничья и строительства Курской области"
 TITLE_APP = "Реестр объектов"
 SUBTITLE = "Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку."
 
-# Путь к гербу (варианты):
-# 1) Если у вас герб лежит в репозитории рядом с app.py — например assets/gerb.png:
-# GERB_PATH = "assets/gerb.png"
-# 2) Если хотите временно — можно оставить как None и загрузить позже.
-GERB_PATH = "assets/gerb.png"  # <-- положите файл в репозиторий по этому пути
+# Названия колонок в CSV (как у вас в таблице)
+COL_ID = "id"
+COL_SECTOR = "sector"
+COL_DISTRICT = "district"
+COL_NAME = "name"
+COL_RESP = "responsible"
+COL_STATUS = "status"
+COL_WORK = "work_flag"
+COL_ADDR = "address"
+COL_CARD = "card_url"
+COL_FOLDER = "folder_url"
 
 
 # =========================
-# CSS (ШАПКА + КАРТОЧКИ)
+# СТРАНИЦА
 # =========================
+st.set_page_config(
+    page_title="Реестр объектов — Курская область",
+    page_icon="🗂️",
+    layout="wide",
+)
+
 CSS = """
 <style>
-/* Убираем лишние отступы Streamlit */
-.block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
+body { background: #f4f7fb; }
 
-/* Шапка */
+/* Контейнер страницы */
+.block-container { padding-top: 0.6rem; padding-bottom: 2rem; max-width: 1200px; }
+
+/* Full-bleed шапка */
+.hero-bleed{
+  position: relative;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  width: 100vw;
+  padding: 26px 0 18px 0;
+}
+.hero-inner{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
 .hero {
   width: 100%;
-  border-radius: 18px;
+  border-radius: 20px;
   padding: 22px 26px;
-  background: radial-gradient(1100px 500px at 10% 0%, rgba(255,255,255,0.10), rgba(255,255,255,0) 60%),
-              linear-gradient(135deg, #1f3b7a 0%, #233c7a 35%, #1c2f63 100%);
+  background:
+    radial-gradient(1100px 520px at 10% 0%, rgba(255,255,255,0.12), rgba(255,255,255,0) 60%),
+    linear-gradient(135deg, #1f3b7a 0%, #233c7a 35%, #1c2f63 100%);
   box-shadow: 0 14px 30px rgba(0,0,0,0.18);
   color: #fff;
   position: relative;
   overflow: hidden;
 }
-
-/* Лёгкий геометрический паттерн */
 .hero:after{
   content:"";
-  position:absolute; inset:-120px -120px auto auto;
-  width:520px; height:520px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0));
-  transform: rotate(25deg);
-  border-radius: 40px;
+  position:absolute;
+  right:-120px; top:-140px;
+  width:620px; height:520px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0));
+  transform: rotate(20deg);
+  border-radius: 44px;
 }
-
-/* сетка внутри шапки */
 .hero-grid{
   position: relative;
   display:flex;
   gap:18px;
   align-items:center;
 }
-
 .hero-logo{
-  width:86px; height:86px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.16);
+  width:92px; height:92px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.18);
   display:flex; align-items:center; justify-content:center;
   flex: 0 0 auto;
   overflow:hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
 }
-.hero-logo img{ width:70px; height:70px; object-fit:contain; }
+.hero-logo img{ width:74px; height:74px; object-fit:contain; }
 
 .hero-titles{ display:flex; flex-direction:column; gap:6px; min-width: 0; }
+
+/* Крупнее “Министерство …”, 2 строки */
 .hero-ministry{
-  font-size: 20px; font-weight: 700; line-height: 1.15;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.18;
   opacity: 0.98;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 980px;
+  word-break: keep-all;
 }
+
+/* “Реестр объектов” */
 .hero-app{
-  font-size: 34px; font-weight: 800; line-height: 1.05;
+  font-size: 36px;
+  font-weight: 900;
+  line-height: 1.05;
   letter-spacing: 0.2px;
+  margin-top: 2px;
 }
+
 .hero-sub{
-  font-size: 13.5px; opacity: 0.92;
+  font-size: 13.5px;
+  opacity: 0.92;
   max-width: 920px;
 }
+
 .pill{
   display:inline-flex; align-items:center; gap:8px;
   margin-top: 10px;
@@ -100,9 +145,6 @@ CSS = """
   background: rgba(255,255,255,0.10);
   width: fit-content;
 }
-
-/* Фильтры */
-.filters-wrap{ margin-top: 14px; }
 
 /* Карточки */
 .card {
@@ -139,7 +181,6 @@ CSS = """
 .meta-ico{ width: 18px; text-align:center; opacity:0.95; }
 .meta b{ font-weight: 700; }
 
-/* бейджи */
 .badges{ display:flex; gap:8px; flex-wrap: wrap; margin: 8px 0 10px 0; }
 .badge{
   display:inline-flex; align-items:center; gap:6px;
@@ -150,191 +191,224 @@ CSS = """
   background: #ffffff;
 }
 
-/* кнопки в строку */
-.btnrow{ display:flex; gap:10px; }
+/* Делаем кнопки чуть ровнее */
+div[data-testid="column"] button, div[data-testid="column"] a {
+  width: 100%;
+}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
 
 # =========================
-# ЗАГРУЗКА ДАННЫХ
+# УТИЛИТЫ
 # =========================
-@st.cache_data(ttl=300, show_spinner=False)
-def load_data(url: str) -> pd.DataFrame:
-    df = pd.read_csv(url, dtype=str).fillna("")
-    # Нормализуем ожидаемые колонки (если вдруг в CSV чуть другие)
-    # Минимум: id, sector, district, name, responsible, status, work_flag, address, card_url, folder_url
-    for col in ["id","sector","district","name","responsible","status","work_flag","address","card_url","folder_url"]:
-        if col not in df.columns:
-            df[col] = ""
-    return df
+def safe(x) -> str:
+    """HTML-экранирование, чтобы никогда не ломались карточки."""
+    if x is None:
+        return ""
+    x = str(x)
+    if x.lower() in ("nan", "none"):
+        return ""
+    return html.escape(x)
 
 
-def safe(s: str) -> str:
-    """Экранируем текст для HTML, чтобы карточки никогда не ломались."""
-    return html.escape("" if s is None else str(s))
+def img_to_b64(path: str) -> str:
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+
+def norm_text(x: str) -> str:
+    x = "" if x is None else str(x)
+    x = x.strip()
+    if x.lower() in ("nan", "none"):
+        return ""
+    return x
 
 
 def district_sort_key(d: str):
-    """
-    Требование: Курск первым, потом Курский район, потом по алфавиту.
-    """
-    x = (d or "").strip().lower()
-    if x in ["г. курск", "город курск", "курск"]:
-        return (0, x)
-    if x in ["курский район", "курский р-н", "курский", "курский р-н."]:
-        return (1, x)
-    return (2, x)
+    """Курск первым, Курский район вторым, дальше по алфавиту."""
+    t = norm_text(d).lower().replace(".", "").replace("ё", "е")
+    # 1) г. Курск
+    if t in ("г курск", "гкурск", "курск", "город курск"):
+        return (0, "курск")
+    # 2) Курский район
+    if "курск" in t and "район" in t:
+        return (1, t)
+    # 3) остальное
+    return (2, t)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_df(csv_url: str) -> pd.DataFrame:
+    r = requests.get(csv_url, timeout=30)
+    r.raise_for_status()
+    content = r.content
+
+    df = pd.read_csv(BytesIO(content), dtype=str).fillna("")
+    # нормализуем пробелы
+    for c in df.columns:
+        df[c] = df[c].astype(str).map(lambda x: x.strip())
+    return df
+
+
+def header_block():
+    logo_html = ""
+    try:
+        if GERB_PATH and os.path.exists(GERB_PATH):
+            logo_html = f'<div class="hero-logo"><img src="data:image/png;base64,{img_to_b64(GERB_PATH)}" /></div>'
+    except Exception:
+        logo_html = ""
+
+    st.markdown(
+        f"""
+        <div class="hero-bleed">
+          <div class="hero-inner">
+            <div class="hero">
+              <div class="hero-grid">
+                {logo_html}
+                <div class="hero-titles">
+                  <div class="hero-ministry">{safe(TITLE_MINISTRY)}</div>
+                  <div class="hero-app">{safe(TITLE_APP)}</div>
+                  <div class="hero-sub">{safe(SUBTITLE)}</div>
+                  <div class="pill">🧾 Источник данных: Google Sheets (CSV)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_card(row: pd.Series):
-    name = row.get("name","")
-    sector = row.get("sector","")
-    district = row.get("district","")
-    address = row.get("address","")
-    responsible = row.get("responsible","")
-    status = row.get("status","")
-    work_flag = row.get("work_flag","")
-    card_url = row.get("card_url","")
-    folder_url = row.get("folder_url","")
+    name = norm_text(row.get(COL_NAME, ""))
+    sector = norm_text(row.get(COL_SECTOR, ""))
+    district = norm_text(row.get(COL_DISTRICT, ""))
+    address = norm_text(row.get(COL_ADDR, ""))
+    responsible = norm_text(row.get(COL_RESP, ""))
+    status = norm_text(row.get(COL_STATUS, ""))
+    work = norm_text(row.get(COL_WORK, ""))
 
-    # Карточка: НИКАКОГО вывода "id" в заголовке (по вашей просьбе)
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+    card_url = norm_text(row.get(COL_CARD, ""))
+    folder_url = norm_text(row.get(COL_FOLDER, ""))
 
-    st.markdown(f'<div class="card-title">{safe(name)}</div>', unsafe_allow_html=True)
-
-    meta_html = f"""
-    <div class="meta">
-      <div class="meta-row"><span class="meta-ico">🏷️</span><span><b>Отрасль:</b> {safe(sector)}</span></div>
-      <div class="meta-row"><span class="meta-ico">📍</span><span><b>Район:</b> {safe(district)}</span></div>
-      <div class="meta-row"><span class="meta-ico">🗺️</span><span><b>Адрес:</b> {safe(address)}</span></div>
-      <div class="meta-row"><span class="meta-ico">👤</span><span><b>Ответственный:</b> {safe(responsible)}</span></div>
-    </div>
-    """
-    st.markdown(meta_html, unsafe_allow_html=True)
+    # БЕЗ ID в заголовке — как вы просили
+    title_text = name if name else "Объект"
 
     # Бейджи
-    badge_status = safe(status) if status.strip() else "—"
-    badge_work = safe(work_flag) if work_flag.strip() else "—"
+    badge_status = status if status else "—"
+    badge_work = work if work else "—"
+
+    # Метаданные — всегда через safe(), чтобы один кривой символ не ломал карточку
+    meta_html = f"""
+    <div class="meta">
+      <div class="meta-row"><span class="meta-ico">🏷️</span><span><b>Отрасль:</b> {safe(sector) if sector else "—"}</span></div>
+      <div class="meta-row"><span class="meta-ico">📍</span><span><b>Район:</b> {safe(district) if district else "—"}</span></div>
+      <div class="meta-row"><span class="meta-ico">🗺️</span><span><b>Адрес:</b> {safe(address) if address else "—"}</span></div>
+      <div class="meta-row"><span class="meta-ico">👤</span><span><b>Ответственный:</b> {safe(responsible) if responsible else "—"}</span></div>
+    </div>
+    """
+
+    st.markdown(f'<div class="card"><div class="card-title">{safe(title_text)}</div>{meta_html}', unsafe_allow_html=True)
 
     st.markdown(
         f"""
         <div class="badges">
-          <span class="badge">📌 <b>Статус:</b> {badge_status}</span>
-          <span class="badge">🛠️ <b>Работы:</b> {badge_work}</span>
+          <div class="badge">📌 <b>Статус:</b> {safe(badge_status)}</div>
+          <div class="badge">🛠️ <b>Работы:</b> {safe(badge_work)}</div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    # Кнопки
     c1, c2 = st.columns(2)
     with c1:
-        if card_url.strip():
+        if card_url:
             st.link_button("📄 Открыть карточку", card_url, use_container_width=True)
         else:
-            st.button("📄 Открыть карточку", disabled=True, use_container_width=True)
+            st.button("📄 Открыть карточку", use_container_width=True, disabled=True)
     with c2:
-        if folder_url.strip():
+        if folder_url:
             st.link_button("📁 Открыть папку", folder_url, use_container_width=True)
         else:
-            st.button("📁 Открыть папку", disabled=True, use_container_width=True)
+            st.button("📁 Открыть папку", use_container_width=True, disabled=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =========================
-# ШАПКА
-# =========================
-def header_block():
-    logo_html = ""
-    try:
-        if GERB_PATH:
-            logo_html = f'<div class="hero-logo"><img src="data:image/png;base64,{img_to_b64(GERB_PATH)}" /></div>'
-    except Exception:
-        # если герб не найден — просто не показываем, чтобы ничего не ломалось
-        logo_html = ""
-
-    st.markdown(
-        f"""
-        <div class="hero">
-          <div class="hero-grid">
-            {logo_html}
-            <div class="hero-titles">
-              <div class="hero-ministry">{safe(TITLE_MINISTRY)}</div>
-              <div class="hero-app">{safe(TITLE_APP)}</div>
-              <div class="hero-sub">{safe(SUBTITLE)}</div>
-              <div class="pill">🧾 Источник данных: Google Sheets (CSV)</div>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-def img_to_b64(path: str) -> str:
-    import base64
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-# =========================
-# UI
+# ОСНОВНОЕ ПРИЛОЖЕНИЕ
 # =========================
 header_block()
-st.markdown("<div class='filters-wrap'></div>", unsafe_allow_html=True)
 
-df = load_data(CSV_URL)
+try:
+    df = load_df(CSV_URL)
+except Exception as e:
+    st.error("Не удалось загрузить CSV. Проверьте ссылку публикации (output=csv) и доступность.")
+    st.code(str(e))
+    st.stop()
 
-# Списки для фильтров
-sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
-districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()], key=district_sort_key)
-statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
+# Проверка наличия колонок
+required_cols = [COL_SECTOR, COL_DISTRICT, COL_NAME, COL_RESP, COL_STATUS, COL_WORK, COL_ADDR, COL_CARD, COL_FOLDER]
+missing = [c for c in required_cols if c not in df.columns]
+if missing:
+    st.error("В CSV не хватает колонок: " + ", ".join(missing))
+    st.info("Проверьте шапку таблицы Google Sheets и названия колонок в начале app.py.")
+    st.stop()
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    sector_choice = st.selectbox("🏷️ Отрасль", ["Все"] + sectors, index=0)
-with col2:
-    district_choice = st.selectbox("📍 Район", ["Все"] + districts, index=0)
-with col3:
-    status_choice = st.selectbox("📌 Статус", ["Все"] + statuses, index=0)
+# Фильтры
+sectors = sorted([s for s in df[COL_SECTOR].unique() if norm_text(s)], key=lambda x: norm_text(x).lower())
+districts = sorted([d for d in df[COL_DISTRICT].unique() if norm_text(d)], key=district_sort_key)
+statuses = sorted([s for s in df[COL_STATUS].unique() if norm_text(s)], key=lambda x: norm_text(x).lower())
 
-query = st.text_input("🔎 Поиск (наименование / адрес / ответственный)", value="").strip().lower()
+colA, colB, colC = st.columns(3)
+with colA:
+    sector_sel = st.selectbox("🏷️ Отрасль", ["Все"] + sectors, index=0)
+with colB:
+    district_sel = st.selectbox("📍 Район", ["Все"] + districts, index=0)
+with colC:
+    status_sel = st.selectbox("📌 Статус", ["Все"] + statuses, index=0)
 
-# Фильтрация
-filtered = df.copy()
+q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="").strip()
 
-if sector_choice != "Все":
-    filtered = filtered[filtered["sector"] == sector_choice]
-if district_choice != "Все":
-    filtered = filtered[filtered["district"] == district_choice]
-if status_choice != "Все":
-    filtered = filtered[filtered["status"] == status_choice]
+# Применяем фильтры
+f = df.copy()
 
-if query:
-    mask = (
-        filtered["name"].str.lower().str.contains(query, na=False) |
-        filtered["address"].str.lower().str.contains(query, na=False) |
-        filtered["responsible"].str.lower().str.contains(query, na=False) |
-        filtered["id"].str.lower().str.contains(query, na=False)
-    )
-    filtered = filtered[mask]
+if sector_sel != "Все":
+    f = f[f[COL_SECTOR].astype(str) == sector_sel]
 
-# Сортировка: сначала по району (с вашим приоритетом), потом по отрасли, потом по названию
-filtered = filtered.copy()
-filtered["_district_key"] = filtered["district"].apply(district_sort_key)
-filtered = filtered.sort_values(by=["_district_key", "sector", "name"], ascending=[True, True, True]).drop(columns=["_district_key"])
+if district_sel != "Все":
+    f = f[f[COL_DISTRICT].astype(str) == district_sel]
 
-st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
+if status_sel != "Все":
+    f = f[f[COL_STATUS].astype(str) == status_sel]
+
+if q:
+    qlow = q.lower()
+    def row_match(r):
+        parts = [
+            str(r.get(COL_ID, "")),
+            str(r.get(COL_NAME, "")),
+            str(r.get(COL_ADDR, "")),
+            str(r.get(COL_RESP, "")),
+        ]
+        joined = " ".join(parts).lower()
+        return qlow in joined
+
+    f = f[f.apply(row_match, axis=1)]
+
+st.caption(f"Показано объектов: {len(f)} из {len(df)}")
 st.divider()
 
-# Вывод карточек в 2 колонки
-left, right = st.columns(2, gap="large")
-rows = filtered.to_dict("records")
+# Сетка карточек
+if len(f) == 0:
+    st.info("По выбранным фильтрам ничего не найдено.")
+    st.stop()
 
-for i, r in enumerate(rows):
-    target = left if i % 2 == 0 else right
-    with target:
-        render_card(pd.Series(r))
+# 2 колонки карточек
+left, right = st.columns(2)
+for i, (_, row) in enumerate(f.iterrows()):
+    with (left if i % 2 == 0 else right):
+        render_card(row)
