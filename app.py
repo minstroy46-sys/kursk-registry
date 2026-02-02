@@ -10,302 +10,370 @@ import streamlit as st
 # НАСТРОЙКИ
 # =========================
 CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwA5g3ZuBmZlY3vQMbc7nautnpK7c4ioKtTYU_mTskZb6A6nJ_yeokKIvfbVBFH1jTPpzOgoBMD89n/pub?gid=372714191&single=true&output=csv"
-GERB_PATH = Path("assets/gerb.png")
-
-MINISTRY_NAME = "Министерство восстановления, развития приграничья и строительства Курской области"
-APP_NAME = "Реестр объектов"
-SUBTITLE = "Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку."
-DATA_PILL = "Источник данных: Google Sheets (CSV)"
+APP_TITLE = "Министерство восстановления, развития приграничья и строительства Курской области"
+APP_SUBTITLE = "Реестр объектов"
+APP_DESC = "Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку."
 
 
 # =========================
-# УТИЛИТЫ
+# HELPERS
 # =========================
-def b64_image(path: Path) -> str:
-    try:
-        data = path.read_bytes()
-        return "data:image/png;base64," + base64.b64encode(data).decode("utf-8")
-    except Exception:
-        return ""
-
-
-def norm_str(x) -> str:
+def esc(x) -> str:
+    """Safe HTML escape + NaN/None -> '—'."""
     if x is None:
         return "—"
-    try:
-        if pd.isna(x):
-            return "—"
-    except Exception:
-        pass
+    if isinstance(x, float) and pd.isna(x):
+        return "—"
+    if pd.isna(x):
+        return "—"
     s = str(x).strip()
-    if not s:
+    if s == "" or s.lower() == "nan":
         return "—"
-    if s.lower() == "nan":
-        return "—"
+    return html.escape(s)
+
+
+def read_image_b64(path: str) -> str:
+    p = Path(path)
+    if not p.exists():
+        return ""
+    data = p.read_bytes()
+    return base64.b64encode(data).decode("utf-8")
+
+
+def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Возвращает первый найденный столбец из списка кандидатов."""
+    lower_map = {c.lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand in df.columns:
+            return cand
+        if cand.lower() in lower_map:
+            return lower_map[cand.lower()]
+    return None
+
+
+def normalize_url(x: str) -> str:
+    s = (x or "").strip()
+    if not s or s.lower() == "nan":
+        return ""
     return s
 
 
-def esc(x) -> str:
-    return html.escape(norm_str(x), quote=True)
+def ordered_districts(values: list[str]) -> list[str]:
+    """Курск -> Курский район -> остальное по алфавиту."""
+    clean = [v for v in values if v and str(v).strip() and str(v).lower() != "nan"]
+    clean = list(dict.fromkeys([str(v).strip() for v in clean]))  # unique preserve
+    # точные приоритеты
+    first = []
+    for prefer in ["г. Курск", "Курск"]:
+        if prefer in clean:
+            first.append(prefer)
+            clean.remove(prefer)
+            break
+    for prefer in ["Курский район", "Курский р-н", "Курский р-он"]:
+        if prefer in clean:
+            first.append(prefer)
+            clean.remove(prefer)
+            break
 
-
-def priority_sort_district(values: list[str]) -> list[str]:
-    cleaned = [v for v in values if v and v != "—"]
-    uniq = sorted(set(cleaned), key=lambda s: s.lower())
-
-    kursk_city_keys = {"г. курск", "город курск", "курск", "г курск"}
-    kursk_raion_keys = {"курский", "курский район", "курский р-н", "курский р-он"}
-
-    def is_kursk_city(s: str) -> bool:
-        t = s.strip().lower()
-        return t in kursk_city_keys or t.startswith("г. курск") or t == "г курск"
-
-    def is_kursk_raion(s: str) -> bool:
-        t = s.strip().lower()
-        return t in kursk_raion_keys or t.startswith("курский район") or t.startswith("курский")
-
-    kursk_city = [x for x in uniq if is_kursk_city(x)]
-    kursk_raion = [x for x in uniq if (not is_kursk_city(x)) and is_kursk_raion(x)]
-    rest = [x for x in uniq if (x not in kursk_city) and (x not in kursk_raion)]
-    return kursk_city + kursk_raion + rest
-
-
-@st.cache_data(show_spinner=False, ttl=300)
-def load_data(url: str) -> pd.DataFrame:
-    df = pd.read_csv(url)
-    needed = [
-        "sector",
-        "district",
-        "name",
-        "responsible",
-        "status",
-        "work_flag",
-        "address",
-        "card_url",
-        "folder_url",
-        "id",
-    ]
-    for col in needed:
-        if col not in df.columns:
-            df[col] = ""
-
-    return df
+    rest = sorted(clean, key=lambda x: x.lower())
+    return first + rest
 
 
 # =========================
 # PAGE
 # =========================
 st.set_page_config(
-    page_title=f"{APP_NAME} — Курская область",
-    page_icon="📋",
+    page_title=f"{APP_SUBTITLE} — Курская область",
+    page_icon="🏛️",
     layout="wide",
 )
 
-gerb_data_uri = b64_image(GERB_PATH)
+GERB_B64 = read_image_b64("assets/gerb.png")
+
 
 # =========================
-# CSS (Шапка ровная, без "ломаных" кругов; Министерство в одну строку)
+# CSS (адаптив + светлая/тёмная тема)
 # =========================
 st.markdown(
     """
 <style>
-/* Главное: НЕ сжимаем слишком сильно, чтобы заголовок помещался в одну строку */
-.block-container {
+/* Стабильные отступы контейнера */
+.main .block-container{
     padding-top: 1.2rem;
-    padding-bottom: 2rem;
-    max-width: 1500px; /* было 1200 */
+    padding-bottom: 2.2rem;
+    max-width: 1200px;
 }
 
-:root {
-  --hero-bg1: #233a6a;
-  --hero-bg2: #142a4e;
-  --hero-line: rgba(255,255,255,0.10);
-  --card-muted: rgba(0,0,0,0.045);
-  --border: rgba(0,0,0,0.08);
+/* ===== HERO ===== */
+.hero-wrap{
+    width: 100%;
+    border-radius: 18px;
+    overflow: hidden;            /* важно: ничего не "режет" углы */
+    box-shadow: 0 14px 30px rgba(0,0,0,.12);
+    background: linear-gradient(135deg, #0f2a57 0%, #1a3f7d 45%, #0e2b5e 100%);
+    position: relative;
 }
 
-.hero {
-  position: relative;
-  overflow: hidden;
-  border-radius: 18px;
-  padding: 22px 22px;
-  background: linear-gradient(135deg, var(--hero-bg1), var(--hero-bg2));
-  box-shadow: 0 18px 35px rgba(0,0,0,0.18);
-  border: 1px solid rgba(255,255,255,0.10);
-  margin-bottom: 16px;
+.hero-wrap::after{
+    content:"";
+    position:absolute;
+    inset:-30%;
+    background:
+      radial-gradient(circle at 70% 35%, rgba(255,255,255,.10), rgba(255,255,255,0) 55%),
+      radial-gradient(circle at 20% 80%, rgba(255,255,255,.08), rgba(255,255,255,0) 60%);
+    transform: rotate(8deg);
+    pointer-events:none;
 }
 
-/* ОДНА мягкая диагональ без "ломаных" элементов */
-.hero::after{
-  content:"";
-  position:absolute;
-  inset:-40px -140px -40px auto;
-  width: 520px;
-  transform: skewX(-18deg);
-  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
-  opacity: 0.55;
-  border-radius: 40px;
+.hero{
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 18px 22px;
 }
 
-/* Внутренности */
-.hero-inner {
-  position: relative;
-  display: grid;
-  grid-template-columns: 86px 1fr;
-  gap: 16px;
-  align-items: center;
+.hero-logo{
+    width: 92px;
+    height: 92px;
+    flex: 0 0 auto;
+    border-radius: 16px;
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.18);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    backdrop-filter: blur(6px);
 }
 
-.hero-logo {
-  width: 76px;
-  height: 76px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.10);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border: 1px solid rgba(255,255,255,0.14);
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);
+.hero-logo img{
+    width: 68px;
+    height: 68px;
+    object-fit: contain;
+    display:block;
 }
 
-.hero-logo img {
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
-  filter: drop-shadow(0 6px 10px rgba(0,0,0,0.25));
+.hero-text{
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
-/* Министерство — ОДНА строка на всю ширину */
-.hero-ministry {
-  color: rgba(255,255,255,0.96);
-  font-weight: 900;
-  letter-spacing: 0.2px;
-  margin: 0 0 6px 0;
-
-  white-space: nowrap;     /* одна строка */
-  overflow: hidden;
-  text-overflow: ellipsis; /* если экран узкий — аккуратно обрежет */
-  font-size: clamp(20px, 1.55vw, 28px); /* адаптивно */
-  line-height: 1.1;
+.hero-ministry{
+    font-size: 22px;
+    line-height: 1.18;
+    font-weight: 800;
+    color: #ffffff;
+    margin: 0 0 6px 0;
+    letter-spacing: .2px;
+    word-break: break-word;
 }
 
-/* Реестр — меньше чем Министерство */
-.hero-app {
-  color: rgba(255,255,255,0.98);
-  font-size: clamp(18px, 1.3vw, 22px);
-  font-weight: 800;
-  margin: 0 0 8px 0;
+.hero-app{
+    font-size: 18px;
+    line-height: 1.18;
+    font-weight: 700;
+    color: rgba(255,255,255,.92);
+    margin: 0 0 10px 0;
 }
 
-.hero-sub {
-  color: rgba(255,255,255,0.85);
-  font-size: 13px;
-  margin: 0 0 10px 0;
+.hero-desc{
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(255,255,255,.85);
+    margin: 0 0 10px 0;
 }
 
-.hero-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.16);
-  color: rgba(255,255,255,0.92);
-  font-size: 12px;
-  width: fit-content;
+.hero-pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.18);
+    color: rgba(255,255,255,.92);
+    font-size: 12px;
 }
 
-.filters-wrap {
-  padding: 10px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background: rgba(0,0,0,0.015);
-  margin-bottom: 10px;
+/* ===== FILTER LABELS ===== */
+.filter-label{
+    font-weight: 700;
+    margin: 2px 0 6px 0;
 }
 
-.card {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 14px 14px 12px 14px;
-  background: white;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+/* ===== CARDS ===== */
+.card{
+    border-radius: 16px;
+    padding: 14px 14px 12px 14px;
+    border: 1px solid rgba(0,0,0,.07);
+    background: rgba(255,255,255,.92);
+    box-shadow: 0 8px 18px rgba(0,0,0,.06);
 }
 
-.card h3 {
-  font-size: 16px;
-  margin: 0 0 10px 0;
+.card-title{
+    font-size: 15px;
+    font-weight: 800;
+    margin: 0 0 10px 0;
 }
 
-.meta {
-  border: 1px solid var(--border);
-  background: var(--card-muted);
-  border-radius: 12px;
-  padding: 10px 10px;
-  margin-bottom: 10px;
+.meta{
+    border-radius: 12px;
+    padding: 10px 10px;
+    background: rgba(0,0,0,.035);
+    border: 1px solid rgba(0,0,0,.06);
 }
 
-.meta-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  margin: 4px 0;
-  color: rgba(0,0,0,0.76);
-  font-size: 12.8px;
+.meta-row{
+    display:flex;
+    align-items:flex-start;
+    gap: 8px;
+    margin: 4px 0;
+    font-size: 13px;
+    line-height: 1.35;
+}
+.meta-ico{
+    width: 18px;
+    flex: 0 0 auto;
 }
 
-.meta-ico {
-  width: 18px;
-  text-align: center;
-  opacity: 0.95;
+.badges{
+    display:flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
 }
 
-.chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 6px 0 10px 0;
+.badge{
+    display:inline-flex;
+    align-items:center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(0,0,0,.08);
+    background: rgba(255,255,255,.75);
+    font-size: 12px;
 }
 
-.chip {
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  border: 1px solid rgba(0,0,0,0.10);
-  background: rgba(0,0,0,0.02);
+/* ===== MOBILE ===== */
+@media (max-width: 640px){
+    .main .block-container{
+        padding-top: .8rem;
+        padding-left: .9rem;
+        padding-right: .9rem;
+    }
+    .hero{
+        flex-wrap: wrap;             /* ключевое: не режет */
+        justify-content: flex-start;
+        padding: 16px 16px;
+    }
+    .hero-logo{
+        width: 80px;
+        height: 80px;
+        border-radius: 14px;
+    }
+    .hero-logo img{
+        width: 60px;
+        height: 60px;
+    }
+    .hero-ministry{
+        font-size: 18px;             /* на телефоне компактнее */
+    }
+    .hero-app{
+        font-size: 16px;
+        margin-bottom: 8px;
+    }
+    .hero-desc{
+        font-size: 12.5px;
+    }
 }
 
-.small-muted {
-  color: rgba(0,0,0,0.55);
-  font-size: 12px;
+/* ===== DARK MODE (телефон часто включает) ===== */
+@media (prefers-color-scheme: dark){
+    /* фон и текст в целом */
+    .main{
+        background: #0b1220 !important;
+        color: rgba(255,255,255,.92) !important;
+    }
+    /* карточки и мета */
+    .card{
+        background: rgba(17,27,46,.85) !important;
+        border: 1px solid rgba(255,255,255,.10) !important;
+        box-shadow: 0 10px 22px rgba(0,0,0,.35) !important;
+    }
+    .card-title{
+        color: rgba(255,255,255,.96) !important;
+    }
+    .meta{
+        background: rgba(255,255,255,.06) !important;
+        border: 1px solid rgba(255,255,255,.10) !important;
+    }
+    .meta-row{
+        color: rgba(255,255,255,.90) !important;
+    }
+    .badge{
+        background: rgba(255,255,255,.06) !important;
+        border: 1px solid rgba(255,255,255,.12) !important;
+        color: rgba(255,255,255,.92) !important;
+    }
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+
 # =========================
-# HEADER
+# DATA
 # =========================
-logo_html = (
-    f'<div class="hero-logo"><img src="{gerb_data_uri}" alt="Герб" /></div>'
-    if gerb_data_uri
-    else '<div class="hero-logo">🏛️</div>'
-)
+@st.cache_data(ttl=300)
+def load_data(url: str) -> pd.DataFrame:
+    df = pd.read_csv(url)
+    # Унификация пустых
+    df = df.replace({pd.NA: None})
+    return df
+
+
+df = load_data(CSV_URL)
+
+# Подбираем основные колонки максимально "устойчиво" (на случай изменений в таблице)
+col_id = pick_col(df, ["ID", "id", "Код", "Код объекта", "Шифр", "Номер"])
+col_name = pick_col(df, ["Наименование", "Название", "Объект", "Наименование объекта"])
+col_sector = pick_col(df, ["Отрасль", "Сфера", "Направление"])
+col_district = pick_col(df, ["Район", "Муниципалитет", "МО", "Территория"])
+col_address = pick_col(df, ["Адрес", "Местоположение", "Адрес объекта"])
+col_resp = pick_col(df, ["Ответственный", "Куратор", "Ответственные"])
+col_status = pick_col(df, ["Статус", "Состояние", "Стадия"])
+col_works = pick_col(df, ["Работы", "Работы?", "Выполнение", "Строительство"])
+col_card_url = pick_col(df, ["Ссылка на карточку", "Карточка", "Card URL", "card_url", "URL карточки"])
+col_folder_url = pick_col(df, ["Ссылка на папку", "Папка", "Folder URL", "folder_url", "URL папки"])
+
+# Если каких-то колонок нет — сделаем "пустые", чтобы приложение не падало
+for c in [col_name, col_sector, col_district, col_address, col_resp, col_status, col_works, col_card_url, col_folder_url]:
+    if c is None:
+        pass
+
+
+# =========================
+# HERO (шапка)
+# =========================
+logo_html = ""
+if GERB_B64:
+    logo_html = f'<div class="hero-logo"><img alt="Герб" src="data:image/png;base64,{GERB_B64}"/></div>'
+else:
+    # если файла нет — оставим аккуратный плейсхолдер
+    logo_html = '<div class="hero-logo">🏛️</div>'
 
 st.markdown(
     f"""
-<div class="hero">
-  <div class="hero-inner">
+<div class="hero-wrap">
+  <div class="hero">
     {logo_html}
-    <div>
-      <div class="hero-ministry">{html.escape(MINISTRY_NAME)}</div>
-      <div class="hero-app">{html.escape(APP_NAME)}</div>
-      <div class="hero-sub">{html.escape(SUBTITLE)}</div>
-      <div class="hero-pill">📄 {html.escape(DATA_PILL)}</div>
+    <div class="hero-text">
+      <div class="hero-ministry">{html.escape(APP_TITLE)}</div>
+      <div class="hero-app">{html.escape(APP_SUBTITLE)}</div>
+      <div class="hero-desc">{html.escape(APP_DESC)}</div>
+      <span class="hero-pill">📄 Источник данных: Google Sheets (CSV)</span>
     </div>
   </div>
 </div>
@@ -313,97 +381,104 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =========================
-# DATA
-# =========================
-df = load_data(CSV_URL)
+st.write("")
 
-sector_vals = sorted(
-    set([norm_str(x) for x in df["sector"].tolist() if norm_str(x) != "—"]),
-    key=lambda s: s.lower(),
-)
-district_vals = priority_sort_district([norm_str(x) for x in df["district"].tolist()])
-status_vals = sorted(
-    set([norm_str(x) for x in df["status"].tolist() if norm_str(x) != "—"]),
-    key=lambda s: s.lower(),
-)
 
 # =========================
 # FILTERS
 # =========================
-st.markdown('<div class="filters-wrap">', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 
 with c1:
-    sector = st.selectbox("🏷️ Отрасль", ["Все"] + sector_vals, index=0)
+    st.markdown('<div class="filter-label">🏷️ Отрасль</div>', unsafe_allow_html=True)
+    sectors = ["Все"]
+    if col_sector:
+        sectors += sorted(
+            [s for s in df[col_sector].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
+            key=lambda x: x.lower(),
+        )
+    sector_sel = st.selectbox("", sectors, index=0)
+
 with c2:
-    district = st.selectbox("📍 Район", ["Все"] + district_vals, index=0)
+    st.markdown('<div class="filter-label">📍 Район</div>', unsafe_allow_html=True)
+    districts = ["Все"]
+    if col_district:
+        raw = df[col_district].dropna().astype(str).str.strip().tolist()
+        districts += ordered_districts(raw)
+    district_sel = st.selectbox("", districts, index=0)
+
 with c3:
-    status = st.selectbox("📌 Статус", ["Все"] + status_vals, index=0)
+    st.markdown('<div class="filter-label">📌 Статус</div>', unsafe_allow_html=True)
+    statuses = ["Все"]
+    if col_status:
+        statuses += sorted(
+            [s for s in df[col_status].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
+            key=lambda x: x.lower(),
+        )
+    status_sel = st.selectbox("", statuses, index=0)
 
-q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="").strip().lower()
-st.markdown("</div>", unsafe_allow_html=True)
+st.markdown('<div class="filter-label">🔎 Поиск (наименование / адрес / ответственный / id)</div>', unsafe_allow_html=True)
+q = st.text_input("", value="").strip().lower()
 
-f = df.copy()
-if sector != "Все":
-    f = f[f["sector"].astype(str).str.strip() == sector]
-if district != "Все":
-    f = f[f["district"].astype(str).str.strip() == district]
-if status != "Все":
-    f = f[f["status"].astype(str).str.strip() == status]
+# =========================
+# APPLY FILTERS
+# =========================
+view = df.copy()
+
+if col_sector and sector_sel != "Все":
+    view = view[view[col_sector].astype(str).str.strip() == sector_sel]
+
+if col_district and district_sel != "Все":
+    view = view[view[col_district].astype(str).str.strip() == district_sel]
+
+if col_status and status_sel != "Все":
+    view = view[view[col_status].astype(str).str.strip() == status_sel]
 
 if q:
-    def row_match(row) -> bool:
-        hay = " ".join(
-            [
-                str(row.get("id", "")),
-                str(row.get("name", "")),
-                str(row.get("address", "")),
-                str(row.get("responsible", "")),
-            ]
-        ).lower()
-        return q in hay
+    search_cols = [c for c in [col_name, col_address, col_resp, col_id] if c]
+    if search_cols:
+        mask = False
+        for c in search_cols:
+            mask = mask | view[c].astype(str).str.lower().str.contains(q, na=False)
+        view = view[mask]
 
-    f = f[f.apply(row_match, axis=1)]
-
-st.markdown(f'<div class="small-muted">Показано объектов: {len(f)} из {len(df)}</div>', unsafe_allow_html=True)
+st.caption(f"Показано объектов: {len(view)} из {len(df)}")
 st.divider()
 
 
 # =========================
-# CARD RENDER
+# RENDER CARDS
 # =========================
 def render_card(row: pd.Series):
-    name = esc(row.get("name"))
-    sector_v = esc(row.get("sector"))
-    district_v = esc(row.get("district"))
-    address_v = esc(row.get("address"))
-    responsible_v = esc(row.get("responsible"))
+    oid = esc(row[col_id]) if col_id else ""
+    name = esc(row[col_name]) if col_name else "Объект"
+    sector = esc(row[col_sector]) if col_sector else "—"
+    district = esc(row[col_district]) if col_district else "—"
+    address = esc(row[col_address]) if col_address else "—"
+    resp = esc(row[col_resp]) if col_resp else "—"
+    status = esc(row[col_status]) if col_status else "—"
+    works = esc(row[col_works]) if col_works else "—"
 
-    status_v = norm_str(row.get("status"))
-    work_v = norm_str(row.get("work_flag"))
+    card_url = normalize_url(str(row[col_card_url])) if col_card_url else ""
+    folder_url = normalize_url(str(row[col_folder_url])) if col_folder_url else ""
 
-    card_url = norm_str(row.get("card_url"))
-    folder_url = norm_str(row.get("folder_url"))
-
-    status_chip = html.escape(status_v if status_v != "—" else "—")
-    work_chip = html.escape(work_v if work_v != "—" else "—")
+    # Заголовок: ID не показываем (как вы хотели), но поиск по id работает.
+    title = name
 
     st.markdown(
         f"""
 <div class="card">
-  <h3>{name}</h3>
-
+  <div class="card-title">{title}</div>
   <div class="meta">
-    <div class="meta-row"><span class="meta-ico">🏷️</span><span><b>Отрасль:</b> {sector_v}</span></div>
-    <div class="meta-row"><span class="meta-ico">📍</span><span><b>Район:</b> {district_v}</span></div>
-    <div class="meta-row"><span class="meta-ico">🗺️</span><span><b>Адрес:</b> {address_v}</span></div>
-    <div class="meta-row"><span class="meta-ico">👤</span><span><b>Ответственный:</b> {responsible_v}</span></div>
+    <div class="meta-row"><span class="meta-ico">🏷️</span><span><b>Отрасль:</b> {sector}</span></div>
+    <div class="meta-row"><span class="meta-ico">📍</span><span><b>Район:</b> {district}</span></div>
+    <div class="meta-row"><span class="meta-ico">🗺️</span><span><b>Адрес:</b> {address}</span></div>
+    <div class="meta-row"><span class="meta-ico">👤</span><span><b>Ответственный:</b> {resp}</span></div>
   </div>
 
-  <div class="chips">
-    <div class="chip">📌 <b>Статус:</b> {status_chip}</div>
-    <div class="chip">🛠️ <b>Работы:</b> {work_chip}</div>
+  <div class="badges">
+    <span class="badge">📌 <b>Статус:</b> {status}</span>
+    <span class="badge">🛠️ <b>Работы:</b> {works}</span>
   </div>
 </div>
 """,
@@ -412,27 +487,24 @@ def render_card(row: pd.Series):
 
     b1, b2 = st.columns(2)
     with b1:
-        if card_url != "—" and card_url.startswith("http"):
+        if card_url:
             st.link_button("📄 Открыть карточку", card_url, use_container_width=True)
         else:
-            st.button("📄 Открыть карточку", use_container_width=True, disabled=True)
+            st.button("📄 Открыть карточку", disabled=True, use_container_width=True, help="Ссылка не заполнена")
     with b2:
-        if folder_url != "—" and folder_url.startswith("http"):
+        if folder_url:
             st.link_button("📁 Открыть папку", folder_url, use_container_width=True)
         else:
-            st.button("📁 Открыть папку", use_container_width=True, disabled=True)
+            st.button("📁 Открыть папку", disabled=True, use_container_width=True, help="Ссылка не заполнена")
 
 
-# =========================
-# GRID
-# =========================
-rows = f.to_dict(orient="records")
-for i in range(0, len(rows), 2):
-    col_left, col_right = st.columns(2)
-    with col_left:
-        render_card(pd.Series(rows[i]))
-    with col_right:
-        if i + 1 < len(rows):
-            render_card(pd.Series(rows[i + 1]))
-        else:
-            st.empty()
+# Выводим в 2 колонки (на мобиле Streamlit сам перестраивает вниз)
+left, right = st.columns(2)
+
+rows = list(view.itertuples(index=False, name=None))
+# itertuples не даёт Series, поэтому делаем через view.iterrows для простоты и стабильности
+for i, (_, r) in enumerate(view.iterrows()):
+    target = left if i % 2 == 0 else right
+    with target:
+        render_card(r)
+        st.write("")
