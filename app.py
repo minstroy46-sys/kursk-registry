@@ -1,5 +1,6 @@
 import base64
 import html
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -15,12 +16,14 @@ APP_TITLE = "Министерство восстановления, развит
 APP_SUBTITLE = "Реестр объектов"
 APP_DESC = "Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку."
 
+ASSET_GERB = "assets/gerb.png"
+
 
 # =========================
 # HELPERS
 # =========================
 def esc(x) -> str:
-    """Safe HTML escape + NaN/None -> '—'."""
+    """HTML-safe + NaN/None/empty -> '—'."""
     if x is None:
         return "—"
     try:
@@ -34,7 +37,7 @@ def esc(x) -> str:
     return html.escape(s)
 
 
-def normalize_text(x) -> str:
+def norm(x) -> str:
     if x is None:
         return ""
     try:
@@ -48,9 +51,8 @@ def normalize_text(x) -> str:
     return s
 
 
-def normalize_url(x) -> str:
-    s = normalize_text(x)
-    return s
+def norm_lower(x) -> str:
+    return norm(x).lower()
 
 
 def read_image_b64(path: str) -> str:
@@ -60,51 +62,18 @@ def read_image_b64(path: str) -> str:
     return base64.b64encode(p.read_bytes()).decode("utf-8")
 
 
-def pick_col_exact(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    """Exact match (case-insensitive)."""
-    lower_map = {c.lower(): c for c in df.columns}
-    for cand in candidates:
-        if cand in df.columns:
-            return cand
-        lc = cand.lower()
-        if lc in lower_map:
-            return lower_map[lc]
-    return None
-
-
-def pick_col_fuzzy(df: pd.DataFrame, keywords: list[str]) -> str | None:
-    """Fuzzy match: finds first column that contains any keyword (case-insensitive)."""
-    cols = list(df.columns)
-    cols_l = [c.lower() for c in cols]
-    for kw in keywords:
-        kw = kw.lower()
-        for i, c in enumerate(cols_l):
-            if kw in c:
-                return cols[i]
-    return None
-
-
-def pick_col(df: pd.DataFrame, exact_candidates: list[str], fuzzy_keywords: list[str]) -> str | None:
-    """Try exact candidates first, then fuzzy keywords."""
-    c = pick_col_exact(df, exact_candidates)
-    if c:
-        return c
-    return pick_col_fuzzy(df, fuzzy_keywords)
-
-
 def ordered_districts(values: list[str]) -> list[str]:
     clean = []
     for v in values:
-        s = normalize_text(v)
+        s = norm(v)
         if s:
             clean.append(s)
 
-    # unique keep order
     clean = list(dict.fromkeys(clean))
 
     first = []
     # 1) Курск
-    for prefer in ["г. Курск", "Курск"]:
+    for prefer in ["г. Курск", "Курск", "г.Курск", "город Курск"]:
         if prefer in clean:
             first.append(prefer)
             clean.remove(prefer)
@@ -121,6 +90,234 @@ def ordered_districts(values: list[str]) -> list[str]:
     return first + rest
 
 
+def looks_like_url(s: str) -> bool:
+    s = s.strip().lower()
+    return s.startswith("http://") or s.startswith("https://")
+
+
+def col_sample_strings(df: pd.DataFrame, col: str, n: int = 80) -> list[str]:
+    ser = df[col].dropna()
+    if ser.empty:
+        return []
+    vals = ser.astype(str).head(n).tolist()
+    vals = [v.strip() for v in vals if v and str(v).strip().lower() != "nan"]
+    return vals
+
+
+def score_column_for_role(values: list[str], role: str) -> float:
+    """Heuristic scoring of a column by its content."""
+    if not values:
+        return -1.0
+
+    # basic stats
+    uniq = len(set(values))
+    total = len(values)
+    avg_len = sum(len(v) for v in values) / max(total, 1)
+
+    low = [v.lower() for v in values]
+
+    if role == "url_card":
+        # lots of urls + maybe docs
+        url_cnt = sum(looks_like_url(v) for v in values)
+        docs_cnt = sum(("docs.google" in v.lower() or "drive.google" in v.lower()) for v in values)
+        return url_cnt * 2 + docs_cnt
+
+    if role == "url_folder":
+        url_cnt = sum(looks_like_url(v) for v in values)
+        folder_hint = sum(("folder" in v.lower() or "folders" in v.lower() or "/folders/" in v.lower()) for v in values)
+        drive_hint = sum(("drive.google" in v.lower()) for v in values)
+        return url_cnt * 2 + folder_hint * 2 + drive_hint
+
+    if role == "id":
+        # patterns: ZDR-001, EDU-010, numbers, etc.
+        pat1 = re.compile(r"^[A-ZА-Я]{2,5}[-_ ]?\d{1,4}$")
+        pat2 = re.compile(r"^\d{1,6}$")
+        hits = sum(bool(pat1.match(v.strip())) or bool(pat2.match(v.strip())) for v in values)
+        # prefer high uniqueness
+        return hits * 2 + (uniq / max(total, 1)) * 10
+
+    if role == "name":
+        # long-ish, unique, not urls, not addresses-heavy
+        url_cnt = sum(looks_like_url(v) for v in values)
+        addr_mark = sum(("ул" in v or "просп" in v or "дом" in v or "г." in v or "проезд" in v) for v in low)
+        # name likes uniqueness and moderate/long length
+        return (uniq / max(total, 1)) * 20 + avg_len * 0.12 - url_cnt * 10 - addr_mark * 0.3
+
+    if role == "sector":
+        # few categories, typical sector words
+        sector_words = ["здравоохран", "образован", "культур", "спорт", "соц", "дорог", "жкх", "благоустр", "транспорт"]
+        word_hits = sum(any(w in v for w in sector_words) for v in low)
+        # prefer not too many uniques
+        uniq_ratio = uniq / max(total, 1)
+        return word_hits * 2 + (1 - uniq_ratio) * 15
+
+    if role == "district":
+        dist_words = ["район", "р-н", "р-он", "курск", "г.", "посел", "село", "дерев", "округ", "мо "]
+        word_hits = sum(any(w in v for w in dist_words) for v in low)
+        uniq_ratio = uniq / max(total, 1)
+        # district usually has limited uniq and words "район/Курск"
+        return word_hits * 2 + (1 - uniq_ratio) * 10 + (avg_len < 40) * 2
+
+    if role == "address":
+        addr_words = ["ул", "улица", "просп", "проспект", "дом", "д.", "корп", "к.", "проезд", "переул", "г.", "с.", "пос."]
+        word_hits = sum(any(w in v for w in addr_words) for v in low)
+        return word_hits * 2 + avg_len * 0.05
+
+    if role == "responsible":
+        # "Иванов И.И." or "Иванова Е.Н.; Юдина А.А."
+        fio_pat = re.compile(r"[А-ЯЁA-Z][а-яёa-z-]+.*\b[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]\.")
+        hits = sum(bool(fio_pat.search(v)) for v in values)
+        return hits * 2 + (avg_len < 80) * 1
+
+    if role == "status":
+        # short labels, repeating
+        uniq_ratio = uniq / max(total, 1)
+        return (1 - uniq_ratio) * 12 + (avg_len < 35) * 2
+
+    if role == "works":
+        works_words = ["да", "нет", "ведутся", "не ведутся", "выполня", "строит", "работ", "подряд"]
+        hits = sum(any(w in v for w in works_words) for v in low)
+        uniq_ratio = uniq / max(total, 1)
+        return hits * 2 + (1 - uniq_ratio) * 8
+
+    return -1.0
+
+
+def detect_columns(df: pd.DataFrame) -> dict:
+    """Detect columns based on content, not only headers."""
+    # normalize headers a bit
+    df = df.copy()
+    df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+
+    cols = list(df.columns)
+
+    # 1) URLs: keep your explicit ones if exist
+    card_url = "card_url" if "card_url" in cols else None
+    folder_url = "folder_url" if "folder_url" in cols else None
+
+    # otherwise detect
+    if not card_url:
+        best = (None, -1.0)
+        for c in cols:
+            vals = col_sample_strings(df, c)
+            sc = score_column_for_role(vals, "url_card")
+            if sc > best[1]:
+                best = (c, sc)
+        card_url = best[0] if best[1] >= 2 else None
+
+    if not folder_url:
+        best = (None, -1.0)
+        for c in cols:
+            vals = col_sample_strings(df, c)
+            sc = score_column_for_role(vals, "url_folder")
+            if sc > best[1]:
+                best = (c, sc)
+        folder_url = best[0] if best[1] >= 2 else None
+
+    # 2) id: keep explicit "id" if exists
+    id_col = "id" if "id" in cols else None
+    if not id_col:
+        best = (None, -1.0)
+        for c in cols:
+            vals = col_sample_strings(df, c)
+            sc = score_column_for_role(vals, "id")
+            if sc > best[1]:
+                best = (c, sc)
+        id_col = best[0] if best[1] >= 3 else None
+
+    # candidate pool excluding url columns
+    exclude = {card_url, folder_url}
+    pool = [c for c in cols if c not in exclude]
+
+    # 3) name
+    best = (None, -1.0)
+    for c in pool:
+        vals = col_sample_strings(df, c)
+        sc = score_column_for_role(vals, "name")
+        if sc > best[1]:
+            best = (c, sc)
+    name_col = best[0]
+
+    # 4) district
+    best = (None, -1.0)
+    for c in pool:
+        if c == name_col:
+            continue
+        vals = col_sample_strings(df, c)
+        sc = score_column_for_role(vals, "district")
+        if sc > best[1]:
+            best = (c, sc)
+    district_col = best[0] if best[1] >= 2 else None
+
+    # 5) sector
+    best = (None, -1.0)
+    for c in pool:
+        if c in {name_col, district_col}:
+            continue
+        vals = col_sample_strings(df, c)
+        sc = score_column_for_role(vals, "sector")
+        if sc > best[1]:
+            best = (c, sc)
+    sector_col = best[0] if best[1] >= 2 else None
+
+    # 6) address
+    best = (None, -1.0)
+    for c in pool:
+        if c in {name_col, district_col, sector_col}:
+            continue
+        vals = col_sample_strings(df, c)
+        sc = score_column_for_role(vals, "address")
+        if sc > best[1]:
+            best = (c, sc)
+    address_col = best[0] if best[1] >= 2 else None
+
+    # 7) responsible
+    best = (None, -1.0)
+    for c in pool:
+        if c in {name_col, district_col, sector_col, address_col}:
+            continue
+        vals = col_sample_strings(df, c)
+        sc = score_column_for_role(vals, "responsible")
+        if sc > best[1]:
+            best = (c, sc)
+    resp_col = best[0] if best[1] >= 2 else None
+
+    # 8) status
+    best = (None, -1.0)
+    for c in pool:
+        if c in {name_col, district_col, sector_col, address_col, resp_col}:
+            continue
+        vals = col_sample_strings(df, c)
+        sc = score_column_for_role(vals, "status")
+        if sc > best[1]:
+            best = (c, sc)
+    status_col = best[0] if best[1] >= 1.5 else None
+
+    # 9) works
+    best = (None, -1.0)
+    for c in pool:
+        if c in {name_col, district_col, sector_col, address_col, resp_col, status_col}:
+            continue
+        vals = col_sample_strings(df, c)
+        sc = score_column_for_role(vals, "works")
+        if sc > best[1]:
+            best = (c, sc)
+    works_col = best[0] if best[1] >= 1.5 else None
+
+    return {
+        "name": name_col,
+        "sector": sector_col,
+        "district": district_col,
+        "address": address_col,
+        "responsible": resp_col,
+        "status": status_col,
+        "works": works_col,
+        "card_url": card_url,
+        "folder_url": folder_url,
+        "id": id_col,
+    }
+
+
 # =========================
 # PAGE
 # =========================
@@ -130,11 +327,10 @@ st.set_page_config(
     layout="wide",
 )
 
-GERB_B64 = read_image_b64("assets/gerb.png")
-
+GERB_B64 = read_image_b64(ASSET_GERB)
 
 # =========================
-# CSS (адаптив + светлая/тёмная тема + скрытие футера)
+# CSS (шапку не ломаем; мобильную поддерживаем)
 # =========================
 st.markdown(
     """
@@ -146,12 +342,12 @@ st.markdown(
     max-width: 1200px;
 }
 
-/* --- попытка убрать нижнюю подпись Streamlit (футер) --- */
+/* скрыть меню/футер (как было) */
 footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
 header {visibility: hidden;}
 
-/* ===== HERO ===== */
+/* ===== HERO (как у тебя сейчас) ===== */
 .hero-wrap{
     width: 100%;
     border-radius: 18px;
@@ -343,104 +539,26 @@ header {visibility: hidden;}
 # =========================
 @st.cache_data(ttl=300)
 def load_data(url: str) -> pd.DataFrame:
-    return pd.read_csv(url)
+    df_ = pd.read_csv(url)
+    df_.columns = [str(c).replace("\ufeff", "").strip() for c in df_.columns]
+    return df_
 
 
 df = load_data(CSV_URL)
+cols = detect_columns(df)
+
+# debug only if ?debug=1
+debug = st.experimental_get_query_params().get("debug", ["0"])[0] == "1"
+if debug:
+    with st.sidebar:
+        st.subheader("Диагностика (включена через ?debug=1)")
+        st.code("\n".join([f"{k}: {v}" for k, v in cols.items()]))
+        with st.expander("Все столбцы df.columns"):
+            st.write(list(df.columns))
 
 
 # =========================
-# COLUMN DETECTION (EXACT + FUZZY)
-# =========================
-col_id = pick_col(
-    df,
-    exact_candidates=["ID", "id", "Код", "Код объекта", "Шифр", "Номер", "№"],
-    fuzzy_keywords=["id", "код", "шифр", "номер", "№"],
-)
-
-col_name = pick_col(
-    df,
-    exact_candidates=["Наименование", "Название", "Объект", "Наименование объекта", "Наименование мероприятия"],
-    fuzzy_keywords=["наимен", "назван", "объект"],
-)
-
-col_sector = pick_col(
-    df,
-    exact_candidates=["Отрасль", "Сфера", "Направление"],
-    fuzzy_keywords=["отрасл", "сфера", "направлен"],
-)
-
-col_district = pick_col(
-    df,
-    exact_candidates=["Район", "Муниципалитет", "МО", "Территория", "Муниципальное образование"],
-    fuzzy_keywords=["район", "муниц", "мо", "террит"],
-)
-
-col_address = pick_col(
-    df,
-    exact_candidates=["Адрес", "Местоположение", "Адрес объекта"],
-    fuzzy_keywords=["адрес", "местопол"],
-)
-
-col_resp = pick_col(
-    df,
-    exact_candidates=["Ответственный", "Куратор", "Ответственные", "Ответственный куратор"],
-    fuzzy_keywords=["ответств", "куратор"],
-)
-
-col_status = pick_col(
-    df,
-    exact_candidates=["Статус", "Состояние", "Стадия", "Стадия/состояние"],
-    fuzzy_keywords=["статус", "состоя", "стад"],
-)
-
-col_works = pick_col(
-    df,
-    exact_candidates=["Работы", "Выполнение", "Строительство", "Работы (да/нет)"],
-    fuzzy_keywords=["работ", "выполн", "строит"],
-)
-
-col_card_url = pick_col(
-    df,
-    exact_candidates=["Ссылка на карточку", "Карточка", "Card URL", "card_url", "URL карточки"],
-    fuzzy_keywords=["карточ", "card", "url карточ"],
-)
-
-col_folder_url = pick_col(
-    df,
-    exact_candidates=["Ссылка на папку", "Папка", "Folder URL", "folder_url", "URL папки"],
-    fuzzy_keywords=["папк", "folder", "url папк"],
-)
-
-
-# =========================
-# SIDEBAR DEBUG (чтобы больше не “слетало” молча)
-# =========================
-with st.sidebar:
-    st.subheader("Диагностика")
-    st.write("Найденные столбцы:")
-    st.code(
-        "\n".join(
-            [
-                f"name: {col_name}",
-                f"sector: {col_sector}",
-                f"district: {col_district}",
-                f"address: {col_address}",
-                f"responsible: {col_resp}",
-                f"status: {col_status}",
-                f"works: {col_works}",
-                f"card_url: {col_card_url}",
-                f"folder_url: {col_folder_url}",
-                f"id: {col_id}",
-            ]
-        )
-    )
-    with st.expander("Показать все названия столбцов (df.columns)"):
-        st.write(list(df.columns))
-
-
-# =========================
-# HERO
+# HERO (НЕ МЕНЯЕМ)
 # =========================
 logo_html = (
     f'<div class="hero-logo"><img alt="Герб" src="data:image/png;base64,{GERB_B64}"/></div>'
@@ -469,63 +587,40 @@ st.write("")
 
 
 # =========================
-# FILTERS (ВАЖНО: key у каждого виджета!)
+# FILTERS (key у каждого виджета!)
 # =========================
 c1, c2, c3 = st.columns(3)
 
 with c1:
     st.markdown('<div class="filter-label">🏷️ Отрасль</div>', unsafe_allow_html=True)
     sectors = ["Все"]
-    if col_sector:
+    if cols["sector"]:
         sectors += sorted(
-            [s for s in df[col_sector].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
+            [s for s in df[cols["sector"]].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
             key=lambda x: x.lower(),
         )
-    sector_sel = st.selectbox(
-        "Отрасль",
-        sectors,
-        index=0,
-        key="sector_sel",
-        label_visibility="collapsed",
-    )
+    sector_sel = st.selectbox("Отрасль", sectors, index=0, key="sector_sel", label_visibility="collapsed")
 
 with c2:
     st.markdown('<div class="filter-label">📍 Район</div>', unsafe_allow_html=True)
     districts = ["Все"]
-    if col_district:
-        raw = df[col_district].dropna().astype(str).str.strip().tolist()
+    if cols["district"]:
+        raw = df[cols["district"]].dropna().astype(str).str.strip().tolist()
         districts += ordered_districts(raw)
-    district_sel = st.selectbox(
-        "Район",
-        districts,
-        index=0,
-        key="district_sel",
-        label_visibility="collapsed",
-    )
+    district_sel = st.selectbox("Район", districts, index=0, key="district_sel", label_visibility="collapsed")
 
 with c3:
     st.markdown('<div class="filter-label">📌 Статус</div>', unsafe_allow_html=True)
     statuses = ["Все"]
-    if col_status:
+    if cols["status"]:
         statuses += sorted(
-            [s for s in df[col_status].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
+            [s for s in df[cols["status"]].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
             key=lambda x: x.lower(),
         )
-    status_sel = st.selectbox(
-        "Статус",
-        statuses,
-        index=0,
-        key="status_sel",
-        label_visibility="collapsed",
-    )
+    status_sel = st.selectbox("Статус", statuses, index=0, key="status_sel", label_visibility="collapsed")
 
 st.markdown('<div class="filter-label">🔎 Поиск (наименование / адрес / ответственный / id)</div>', unsafe_allow_html=True)
-q = st.text_input(
-    "Поиск",
-    value="",
-    key="search_q",
-    label_visibility="collapsed",
-).strip().lower()
+q = st.text_input("Поиск", value="", key="search_q", label_visibility="collapsed").strip().lower()
 
 
 # =========================
@@ -533,17 +628,17 @@ q = st.text_input(
 # =========================
 view = df.copy()
 
-if col_sector and sector_sel != "Все":
-    view = view[view[col_sector].astype(str).str.strip() == sector_sel]
+if cols["sector"] and sector_sel != "Все":
+    view = view[view[cols["sector"]].astype(str).str.strip() == sector_sel]
 
-if col_district and district_sel != "Все":
-    view = view[view[col_district].astype(str).str.strip() == district_sel]
+if cols["district"] and district_sel != "Все":
+    view = view[view[cols["district"]].astype(str).str.strip() == district_sel]
 
-if col_status and status_sel != "Все":
-    view = view[view[col_status].astype(str).str.strip() == status_sel]
+if cols["status"] and status_sel != "Все":
+    view = view[view[cols["status"]].astype(str).str.strip() == status_sel]
 
 if q:
-    search_cols = [c for c in [col_name, col_address, col_resp, col_id] if c]
+    search_cols = [c for c in [cols["name"], cols["address"], cols["responsible"], cols["id"]] if c]
     if search_cols:
         mask = False
         for c in search_cols:
@@ -558,18 +653,17 @@ st.divider()
 # RENDER CARDS
 # =========================
 def render_card(row: pd.Series):
-    # имя
-    name = esc(row[col_name]) if col_name else "Объект"
+    name = esc(row[cols["name"]]) if cols["name"] else "Объект"
 
-    sector = esc(row[col_sector]) if col_sector else "—"
-    district = esc(row[col_district]) if col_district else "—"
-    address = esc(row[col_address]) if col_address else "—"
-    resp = esc(row[col_resp]) if col_resp else "—"
-    status = esc(row[col_status]) if col_status else "—"
-    works = esc(row[col_works]) if col_works else "—"
+    sector = esc(row[cols["sector"]]) if cols["sector"] else "—"
+    district = esc(row[cols["district"]]) if cols["district"] else "—"
+    address = esc(row[cols["address"]]) if cols["address"] else "—"
+    resp = esc(row[cols["responsible"]]) if cols["responsible"] else "—"
+    status = esc(row[cols["status"]]) if cols["status"] else "—"
+    works = esc(row[cols["works"]]) if cols["works"] else "—"
 
-    card_url = normalize_url(row[col_card_url]) if col_card_url else ""
-    folder_url = normalize_url(row[col_folder_url]) if col_folder_url else ""
+    card_url = norm(row[cols["card_url"]]) if cols["card_url"] else ""
+    folder_url = norm(row[cols["folder_url"]]) if cols["folder_url"] else ""
 
     st.markdown(
         f"""
@@ -596,12 +690,12 @@ def render_card(row: pd.Series):
         if card_url:
             st.link_button("📄 Открыть карточку", card_url, use_container_width=True)
         else:
-            st.button("📄 Открыть карточку", disabled=True, use_container_width=True, help="Ссылка не заполнена")
+            st.button("📄 Открыть карточку", disabled=True, use_container_width=True)
     with b2:
         if folder_url:
             st.link_button("📁 Открыть папку", folder_url, use_container_width=True)
         else:
-            st.button("📁 Открыть папку", disabled=True, use_container_width=True, help="Ссылка не заполнена")
+            st.button("📁 Открыть папку", disabled=True, use_container_width=True)
 
 
 left, right = st.columns(2)
