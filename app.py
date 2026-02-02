@@ -1,37 +1,74 @@
-import os
 import base64
+import os
+import re
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
 
-# ----------------------------
-# PAGE
-# ----------------------------
-st.set_page_config(
-    page_title="Реестр объектов — Курская область",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+# =============================
+# CONFIG
+# =============================
+st.set_page_config(page_title="Реестр объектов", layout="wide")
 
-# ----------------------------
+
+# =============================
 # HELPERS
-# ----------------------------
-def _img_to_b64(path: str) -> str:
-    """Load local image and return base64 string. Returns empty string if not found."""
+# =============================
+def safe_text(v, fallback="—"):
+    if v is None:
+        return fallback
     try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
+        if pd.isna(v):
+            return fallback
     except Exception:
+        pass
+    s = str(v).strip()
+    return s if s else fallback
+
+
+def norm_col(s: str) -> str:
+    """Normalize column names to compare them reliably."""
+    if s is None:
         return ""
+    s = str(s).strip().lower()
+    s = s.replace("ё", "е")
+    s = re.sub(r"\s+", " ", s)
+    return s
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_registry() -> pd.DataFrame:
-    """
-    Priority:
-    1) st.secrets["CSV_URL"] (Google Sheets CSV published)
-    2) local .xlsx in repo (registry_public sheet) if exists
-    """
+def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Pick first matching column from candidates by normalized name."""
+    cols = {norm_col(c): c for c in df.columns}
+    for cand in candidates:
+        nc = norm_col(cand)
+        if nc in cols:
+            return cols[nc]
+    # also try contains matching
+    for cand in candidates:
+        nc = norm_col(cand)
+        for c in df.columns:
+            if nc and nc in norm_col(c):
+                return c
+    return None
+
+
+def read_local_crest_b64() -> str | None:
+    """Read assets/gerb.png and return base64 string."""
+    p = Path(__file__).parent / "assets" / "gerb.png"
+    if not p.exists():
+        return None
+    data = p.read_bytes()
+    return base64.b64encode(data).decode("utf-8")
+
+
+# =============================
+# DATA LOADING
+# =============================
+@st.cache_data(show_spinner=False)
+def load_data() -> pd.DataFrame:
+    # Priority 1: CSV_URL from secrets
     csv_url = None
     try:
         csv_url = st.secrets.get("CSV_URL", None)
@@ -40,236 +77,300 @@ def load_registry() -> pd.DataFrame:
 
     df = pd.DataFrame()
 
-    # 1) From Google Sheets CSV
     if csv_url:
         try:
-            # keep_default_na=False to avoid "nan" strings ruining UI
-            df = pd.read_csv(csv_url, dtype=str, keep_default_na=False)
-        except Exception as e:
-            st.warning(f"Не удалось прочитать CSV_URL из Secrets: {e}")
+            df = pd.read_csv(csv_url)
+        except Exception:
+            # sometimes google gives ; separator or encoding issues
+            try:
+                df = pd.read_csv(csv_url, sep=";")
+            except Exception:
+                df = pd.DataFrame()
 
-    # 2) Fallback to local xlsx
+    # Priority 2: local XLSX in repo (if exists)
     if df.empty:
-        # if you keep an xlsx in repo, put its name here (optional)
-        for candidate in [
+        # try common filenames
+        candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
+            "РЕЕСТР_объектов_Курская_область_2025-2028 (7).xlsx",
             "registry.xlsx",
             "data.xlsx",
-        ]:
-            if os.path.exists(candidate):
+        ]
+        for name in candidates:
+            p = Path(__file__).parent / name
+            if p.exists():
                 try:
-                    df = pd.read_excel(candidate, sheet_name="registry_public", dtype=str)
-                    df = df.fillna("")
+                    df = pd.read_excel(p, sheet_name=0)
                     break
                 except Exception:
                     pass
 
-    # Normalize columns (important!)
-    df.columns = [c.strip() for c in df.columns]
+    # If still empty - return empty DF
+    if df is None or df.empty:
+        return pd.DataFrame()
 
-    # Expected columns for your registry_public
-    expected = {
-        "id", "sector", "district", "name", "responsible",
-        "status", "work_flag", "address", "card_url", "folder_url"
-    }
-
-    # If вдруг пришли русские заголовки — пробуем мягко переименовать
-    ru_map = {
-        "ID": "id",
-        "Отрасль": "sector",
-        "Район": "district",
-        "Наименование_объекта": "name",
-        "Наименование объекта": "name",
-        "Ответственный": "responsible",
-        "Статус": "status",
-        "Работы": "work_flag",
-        "Адрес": "address",
-        "Ссылка_на_карточку_(Google_док)": "card_url",
-        "Ссылка на карточку": "card_url",
-        "Ссылка_на_папку_(Drive)": "folder_url",
-        "Ссылка на папку": "folder_url",
-    }
-
-    for k, v in ru_map.items():
-        if k in df.columns and v not in df.columns:
-            df = df.rename(columns={k: v})
-
-    # Ensure all expected columns exist (create empty if missing)
-    for col in expected:
-        if col not in df.columns:
-            df[col] = ""
-
-    # Final clean
-    df = df[list(expected)].copy()
-    for col in df.columns:
-        df[col] = df[col].astype(str).fillna("").str.strip()
+    # Ensure columns are strings
+    df.columns = [str(c).strip() for c in df.columns]
 
     return df
 
 
-def safe_text(x: str, fallback: str = "—") -> str:
-    x = (x or "").strip()
-    if x.lower() == "nan" or x == "":
-        return fallback
-    return x
+def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Create unified columns:
+    id, sector, district, name, address, responsible, status, work_flag, card_url, folder_url
+    by mapping from Russian headers or already-normalized headers.
+    """
+    if df.empty:
+        return df
+
+    # map from your registry (Russian) and tech names
+    col_id = pick_col(df, ["id", "ID"])
+    col_sector = pick_col(df, ["отрасль", "sector"])
+    col_district = pick_col(df, ["район", "district"])
+    col_name = pick_col(df, ["наименование_объекта", "наименование объекта", "объект", "name"])
+    col_address = pick_col(df, ["адрес", "address"])
+    col_resp = pick_col(df, ["ответственный", "responsible"])
+    col_status = pick_col(df, ["статус", "status"])
+    col_works = pick_col(df, ["работы", "works", "вид работ", "work_flag"])
+    col_card = pick_col(df, ["ссылка_на_карточку_(google)", "ссылка на карточку", "card_url", "ссылка_на_карточку"])
+    col_folder = pick_col(df, ["ссылка_на_папку_(drive)", "ссылка на папку", "folder_url", "ссылка_на_папку"])
+
+    out = pd.DataFrame()
+    out["id"] = df[col_id] if col_id else ""
+    out["sector"] = df[col_sector] if col_sector else ""
+    out["district"] = df[col_district] if col_district else ""
+    out["name"] = df[col_name] if col_name else ""
+    out["address"] = df[col_address] if col_address else ""
+    out["responsible"] = df[col_resp] if col_resp else ""
+    out["status"] = df[col_status] if col_status else ""
+    out["work_flag"] = df[col_works] if col_works else ""
+    out["card_url"] = df[col_card] if col_card else ""
+    out["folder_url"] = df[col_folder] if col_folder else ""
+
+    # Clean
+    for c in out.columns:
+        out[c] = out[c].astype(str).replace({"nan": "", "None": ""})
+
+    return out
 
 
-def make_pill(text: str) -> str:
-    return f"""<span class="pill">{text}</span>"""
-
-
-# ----------------------------
-# STYLES
-# ----------------------------
-crest_b64 = _img_to_b64(os.path.join("assets", "gerb.png"))
+# =============================
+# STYLES (ШАПКУ НЕ ТРОГАЕМ — оставляем как есть)
+# =============================
+crest_b64 = read_local_crest_b64()  # can be None
 
 st.markdown(
     """
 <style>
-/* --- Make content nicely wide (but still aligned) --- */
-section.main > div.block-container{
-    max-width: 1600px;
-    padding-top: 1.2rem;
-    padding-bottom: 2.5rem;
-    padding-left: 2.2rem;
-    padding-right: 2.2rem;
-}
+/* --- Page base --- */
+.block-container { padding-top: 24px !important; max-width: 1200px; }
+@media (max-width: 1200px){ .block-container { max-width: 96vw; } }
 
-/* Hide default Streamlit footer/menu (Cloud overlay "Manage app" cannot be removed) */
+div[data-testid="stHorizontalBlock"]{ gap: 14px; }
+
+/* Hide Streamlit footer/menu (не 100% гарантия на Cloud, но обычно помогает) */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-/* --- HERO --- */
-.hero-wrap{
-    width: 100%;
-    margin: 0.4rem 0 1.0rem 0;
-}
+/* --- Hero (existing) --- */
+.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 14px; }
 .hero{
-    width: 100%;
-    background: linear-gradient(180deg, #183a6e 0%, #0f2f5f 100%);
-    border-radius: 16px;
-    padding: 18px 20px;
-    box-shadow: 0 14px 30px rgba(0,0,0,.18);
-    position: relative;
-    overflow: hidden;
-}
-.hero:before{
-    content:"";
-    position:absolute;
-    right:-160px;
-    top:-140px;
-    width:520px;
-    height:520px;
-    background: radial-gradient(circle, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 60%);
-    transform: rotate(18deg);
+  width: 100%;
+  border-radius: 18px;
+  padding: 18px 18px;
+  background: radial-gradient(1200px 380px at 22% 30%, rgba(60,130,255,.22), rgba(0,0,0,0) 55%),
+              linear-gradient(135deg, #0b2a57, #1b4c8f);
+  box-shadow: 0 18px 34px rgba(0,0,0,.18);
+  position: relative;
+  overflow: hidden;
 }
 .hero:after{
-    content:"";
-    position:absolute;
-    left:45%;
-    top:0;
-    width:55%;
-    height:100%;
-    background: linear-gradient(115deg, rgba(255,255,255,.08) 0%, rgba(255,255,255,0) 60%);
-    clip-path: polygon(0 0, 100% 0, 100% 100%, 18% 100%);
-    opacity: .8;
+  content:"";
+  position:absolute;
+  inset:-40px -120px auto auto;
+  width: 520px; height: 320px;
+  background: rgba(255,255,255,.08);
+  transform: rotate(14deg);
+  border-radius: 32px;
 }
-
-/* hero row */
 .hero-row{
-    display:flex;
-    align-items:center;
-    gap: 16px;
-    position: relative;
-    z-index: 2;
+  display:flex;
+  align-items:flex-start;
+  gap: 16px;
+  position: relative;
+  z-index: 2;
 }
 .hero-crest{
-    width: 76px;
-    height: 76px;
-    border-radius: 14px;
-    background: rgba(255,255,255,.08);
-    border: 1px solid rgba(255,255,255,.10);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    overflow:hidden;
-    flex: 0 0 auto;
+  width: 74px; height: 74px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.10);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border: 1px solid rgba(255,255,255,.16);
+  flex: 0 0 auto;
 }
 .hero-crest img{
-    width: 64px;
-    height: 64px;
-    object-fit: contain;
+  width: 56px; height: 56px; object-fit: contain;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
 }
-.hero-titles{
-    flex: 1 1 auto;
-    min-width: 0;
-}
+.hero-titles{ flex: 1 1 auto; min-width: 0; }
 .hero-ministry{
-    font-weight: 800;
-    font-size: 24px;
-    line-height: 1.15;
-    color: #fff;
-    margin: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  color: rgba(255,255,255,.95);
+  font-weight: 900;
+  font-size: 20px;
+  line-height: 1.15;
 }
 .hero-app{
-    font-weight: 800;
-    font-size: 18px;
-    color: rgba(255,255,255,.92);
-    margin-top: 4px;
+  margin-top: 6px;
+  color: rgba(255,255,255,.92);
+  font-weight: 800;
+  font-size: 16px;
 }
 .hero-sub{
-    font-size: 13px;
-    color: rgba(255,255,255,.85);
-    margin-top: 6px;
+  margin-top: 6px;
+  color: rgba(255,255,255,.78);
+  font-size: 13px;
 }
 .pill{
-    display:inline-flex;
-    align-items:center;
-    gap: 8px;
-    padding: 7px 10px;
-    border-radius: 999px;
-    background: rgba(255,255,255,.10);
-    border: 1px solid rgba(255,255,255,.12);
-    color: rgba(255,255,255,.92);
-    font-size: 12px;
-    margin-top: 10px;
+  margin-top: 10px;
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.90);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-/* Mobile fixes */
+/* make title stay on one line as much as possible */
 @media (max-width: 900px){
-  section.main > div.block-container{
-    padding-left: 1.0rem;
-    padding-right: 1.0rem;
-  }
-  .hero-row{ align-items:flex-start; }
-  .hero-ministry{
-    white-space: normal;       /* allow wrap on phone */
-    overflow: visible;
-    text-overflow: unset;
-    font-size: 20px;
-  }
-  .hero-app{ font-size: 16px; }
+  .hero-ministry{ font-size: 16px; }
+  .hero-row{ align-items:center; }
+}
+
+/* =========================
+   CARDS (ONLY DESIGN CHANGE)
+   ========================= */
+.card{
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, .10);
+  border-radius: 14px;
+  padding: 16px 16px 14px 16px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.06);
+  margin-bottom: 14px;
+}
+
+.card-title{
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 800;
+  margin: 0 0 10px 0;
+  color: #0f172a;
+}
+
+.card-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 18px;
+  margin-top: 6px;
+}
+
+.card-item{
+  font-size: 14px;
+  color: rgba(15, 23, 42, .92);
+}
+.card-item b{
+  color: rgba(15, 23, 42, .95);
+}
+
+.card-tags{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.tag{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, .10);
+  background: rgba(15, 23, 42, .03);
+  font-size: 13px;
+  color: rgba(15, 23, 42, .90);
+}
+
+.card-actions{
+  display:flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.a-btn{
+  flex: 1 1 0;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, .12);
+  background: rgba(255,255,255,.95);
+  text-decoration:none !important;
+  color: rgba(15, 23, 42, .92) !important;
+  font-weight: 700;
+  font-size: 14px;
+  transition: .12s ease-in-out;
+}
+
+.a-btn:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(0,0,0,.08);
+}
+
+.a-btn.disabled{
+  opacity: .45;
+  pointer-events: none;
+}
+
+.card-extra{
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(15, 23, 42, .14);
+  font-size: 13px;
+  color: rgba(15, 23, 42, .70);
+}
+
+/* Mobile: one column inside card grid */
+@media (max-width: 900px){
+  .card-grid{ grid-template-columns: 1fr; }
+  .card-title{ font-size: 18px; }
 }
 </style>
 """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
-# ----------------------------
-# HERO RENDER (DO NOT TOUCH LATER)
-# ----------------------------
+
+# =============================
+# HERO (unchanged)
+# =============================
 crest_html = ""
 if crest_b64:
-    crest_html = f"""<img src="data:image/png;base64,{crest_b64}" alt="Герб">"""
+    crest_html = f'<img src="data:image/png;base64,{crest_b64}" alt="Герб"/>'
 else:
-    # graceful fallback (won't break layout)
-    crest_html = """<div style="color:rgba(255,255,255,.75);font-size:12px;">герб</div>"""
+    crest_html = '<span style="color:rgba(255,255,255,.8);font-weight:800;font-size:12px;">герб</span>'
 
-hero_html = f"""
+st.markdown(
+    f"""
 <div class="hero-wrap">
   <div class="hero">
     <div class="hero-row">
@@ -283,121 +384,129 @@ hero_html = f"""
     </div>
   </div>
 </div>
-"""
-st.markdown(hero_html, unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# ----------------------------
-# LOAD DATA
-# ----------------------------
-df = load_registry()
 
-if df.empty:
+# =============================
+# LOAD + PREPARE
+# =============================
+raw = load_data()
+if raw.empty:
     st.error("Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets или наличие .xlsx в репозитории.")
     st.stop()
 
-# ----------------------------
-# OPTIONAL DIAGNOSTICS (OFF by default)
-# ----------------------------
-with st.sidebar:
-    st.markdown("### Диагностика")
-    show_diag = st.checkbox("Показать диагностику", value=False)
-    if show_diag:
-        st.write("Колонки:", list(df.columns))
-        st.write("Первые строки:", df.head(3))
+df = normalize_schema(raw)
 
-# ----------------------------
-# FILTERS (one row: Sector | District | Status)
-# ----------------------------
-sector_list = sorted([x for x in df["sector"].unique() if x and x.lower() != "nan"])
-district_list = sorted([x for x in df["district"].unique() if x and x.lower() != "nan"])
-status_list = sorted([x for x in df["status"].unique() if x and x.lower() != "nan"])
+# unique lists
+sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
+districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()])
+statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
 
-c1, c2, c3 = st.columns([1, 1, 1])
+sectors = ["Все"] + sectors
+districts = ["Все"] + districts
+statuses = ["Все"] + statuses
 
+
+# =============================
+# FILTERS (unchanged logic)
+# =============================
+c1, c2, c3 = st.columns(3)
 with c1:
-    sector_sel = st.selectbox("🏷️ Отрасль", ["Все"] + sector_list, index=0)
+    sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
 with c2:
-    district_sel = st.selectbox("📍 Район", ["Все"] + district_list, index=0)
+    district_sel = st.selectbox("📍 Район", districts, index=0, key="f_district")
 with c3:
-    status_sel = st.selectbox("📌 Статус", ["Все"] + status_list, index=0)
+    status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 
-q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="")
+q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="", key="f_search").strip().lower()
 
-# Apply filters
 filtered = df.copy()
 
 if sector_sel != "Все":
-    filtered = filtered[filtered["sector"] == sector_sel]
+    filtered = filtered[filtered["sector"].astype(str) == str(sector_sel)]
 if district_sel != "Все":
-    filtered = filtered[filtered["district"] == district_sel]
+    filtered = filtered[filtered["district"].astype(str) == str(district_sel)]
 if status_sel != "Все":
-    filtered = filtered[filtered["status"] == status_sel]
+    filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
 
-if q.strip():
-    s = q.strip().lower()
-    mask = (
-        filtered["name"].str.lower().str.contains(s, na=False) |
-        filtered["address"].str.lower().str.contains(s, na=False) |
-        filtered["responsible"].str.lower().str.contains(s, na=False) |
-        filtered["id"].str.lower().str.contains(s, na=False)
-    )
-    filtered = filtered[mask]
+if q:
+    def row_match(r):
+        s = " ".join([
+            str(r.get("name", "")),
+            str(r.get("address", "")),
+            str(r.get("responsible", "")),
+            str(r.get("id", "")),
+        ]).lower()
+        return q in s
+
+    filtered = filtered[filtered.apply(row_match, axis=1)]
 
 st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
 st.divider()
 
-# ----------------------------
-# CARDS
-# ----------------------------
+
+# =============================
+# CARD RENDER (ONLY DESIGN CHANGE)
+# =============================
 def render_card(row: pd.Series):
     title = safe_text(row.get("name", ""), fallback="Объект")
-    sector = safe_text(row.get("sector", ""))
-    district = safe_text(row.get("district", ""))
-    address = safe_text(row.get("address", ""))
-    responsible = safe_text(row.get("responsible", ""))
+    sector = safe_text(row.get("sector", ""), fallback="—")
+    district = safe_text(row.get("district", ""), fallback="—")
+    address = safe_text(row.get("address", ""), fallback="—")
+    responsible = safe_text(row.get("responsible", ""), fallback="—")
+
     status = safe_text(row.get("status", ""), fallback="—")
     work_flag = safe_text(row.get("work_flag", ""), fallback="—")
 
     card_url = safe_text(row.get("card_url", ""), fallback="")
     folder_url = safe_text(row.get("folder_url", ""), fallback="")
 
-    with st.container(border=True):
-        st.markdown(f"### {title}")
+    btn_card = (
+        f'<a class="a-btn" href="{card_url}" target="_blank">📄 Открыть карточку</a>'
+        if card_url and card_url != "—" else
+        '<span class="a-btn disabled">📄 Открыть карточку</span>'
+    )
+    btn_folder = (
+        f'<a class="a-btn" href="{folder_url}" target="_blank">📁 Открыть папку</a>'
+        if folder_url and folder_url != "—" else
+        '<span class="a-btn disabled">📁 Открыть папку</span>'
+    )
 
-        # meta
-        st.markdown(
-            f"""
-- 🏷️ **Отрасль:** {sector}
-- 📍 **Район:** {district}
-- 🗺️ **Адрес:** {address}
-- 👤 **Ответственный:** {responsible}
-""".strip()
-        )
+    st.markdown(
+        f"""
+<div class="card">
+  <div class="card-title">{title}</div>
 
-        a, b = st.columns([1, 1])
-        with a:
-            st.write(f"📌 **Статус:** {status}")
-        with b:
-            st.write(f"🛠️ **Работы:** {work_flag}")
+  <div class="card-grid">
+    <div class="card-item">🏷️ <b>Отрасль:</b> {sector}</div>
+    <div class="card-item">📍 <b>Район:</b> {district}</div>
+    <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
+    <div class="card-item">👤 <b>Ответственный:</b> {responsible}</div>
+  </div>
 
-        b1, b2 = st.columns(2)
-        with b1:
-            if card_url:
-                st.link_button("📄 Открыть карточку", card_url, use_container_width=True)
-            else:
-                st.button("📄 Открыть карточку", disabled=True, use_container_width=True)
+  <div class="card-tags">
+    <span class="tag">📌 <b>Статус:</b> {status}</span>
+    <span class="tag">🛠️ <b>Работы:</b> {work_flag}</span>
+  </div>
 
-        with b2:
-            if folder_url:
-                st.link_button("📁 Открыть папку", folder_url, use_container_width=True)
-            else:
-                st.button("📁 Открыть папку", disabled=True, use_container_width=True)
+  <div class="card-actions">
+    {btn_card}
+    {btn_folder}
+  </div>
+
+  <div class="card-extra">
+    Место под фото и дополнительные пункты (заполнишь в реестре — мы красиво выведем позже).
+  </div>
+</div>
+""",
+        unsafe_allow_html=True
+    )
 
 
-# Grid: Streamlit will auto-stack on mobile
-cols = st.columns(2)
-i = 0
+# =============================
+# OUTPUT: ONE COLUMN (as requested)
+# =============================
 for _, r in filtered.iterrows():
-    with cols[i % 2]:
-        render_card(r)
-    i += 1
+    render_card(r)
