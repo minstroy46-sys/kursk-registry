@@ -1,5 +1,4 @@
 import base64
-import os
 import re
 from pathlib import Path
 
@@ -29,7 +28,7 @@ def safe_text(v, fallback="—"):
 
 
 def norm_col(s: str) -> str:
-    """Normalize column names to compare them reliably."""
+    """Normalize text/column names to compare them reliably."""
     if s is None:
         return ""
     s = str(s).strip().lower()
@@ -63,6 +62,23 @@ def read_local_crest_b64() -> str | None:
     return base64.b64encode(data).decode("utf-8")
 
 
+def move_prochie_to_bottom(items: list[str]) -> list[str]:
+    """
+    В списке отраслей переместить 'Прочие' (и близкие варианты) в самый низ.
+    Работает без ломания оригинального написания.
+    """
+    if not items:
+        return items
+
+    def is_prochie(x: str) -> bool:
+        nx = norm_col(x)
+        return nx in ("прочие", "прочее")
+
+    prochie = [x for x in items if is_prochie(x)]
+    rest = [x for x in items if not is_prochie(x)]
+    return rest + prochie
+
+
 # =============================
 # DATA LOADING
 # =============================
@@ -89,7 +105,6 @@ def load_data() -> pd.DataFrame:
 
     # Priority 2: local XLSX in repo (if exists)
     if df.empty:
-        # try common filenames
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
             "РЕЕСТР_объектов_Курская_область_2025-2028 (7).xlsx",
@@ -105,13 +120,10 @@ def load_data() -> pd.DataFrame:
                 except Exception:
                     pass
 
-    # If still empty - return empty DF
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # Ensure columns are strings
     df.columns = [str(c).strip() for c in df.columns]
-
     return df
 
 
@@ -124,7 +136,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # map from your registry (Russian) and tech names
     col_id = pick_col(df, ["id", "ID"])
     col_sector = pick_col(df, ["отрасль", "sector"])
     col_district = pick_col(df, ["район", "district"])
@@ -133,8 +144,14 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     col_resp = pick_col(df, ["ответственный", "responsible"])
     col_status = pick_col(df, ["статус", "status"])
     col_works = pick_col(df, ["работы", "works", "вид работ", "work_flag"])
-    col_card = pick_col(df, ["ссылка_на_карточку_(google)", "ссылка на карточку", "card_url", "ссылка_на_карточку"])
-    col_folder = pick_col(df, ["ссылка_на_папку_(drive)", "ссылка на папку", "folder_url", "ссылка_на_папку"])
+    col_card = pick_col(
+        df,
+        ["ссылка_на_карточку_(google)", "ссылка на карточку", "card_url", "ссылка_на_карточку"],
+    )
+    col_folder = pick_col(
+        df,
+        ["ссылка_на_папку_(drive)", "ссылка на папку", "folder_url", "ссылка_на_папку"],
+    )
 
     out = pd.DataFrame()
     out["id"] = df[col_id] if col_id else ""
@@ -148,7 +165,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["card_url"] = df[col_card] if col_card else ""
     out["folder_url"] = df[col_folder] if col_folder else ""
 
-    # Clean
     for c in out.columns:
         out[c] = out[c].astype(str).replace({"nan": "", "None": ""})
 
@@ -390,6 +406,42 @@ st.markdown(
 
 
 # =============================
+# AUTH (PASSWORD GATE)
+# =============================
+def get_app_password() -> str | None:
+    try:
+        return st.secrets.get("APP_PASSWORD", None)
+    except Exception:
+        return None
+
+
+APP_PASSWORD = get_app_password()
+
+# Если пароль задан в Secrets — включаем доступ по паролю
+if APP_PASSWORD:
+    if "auth_ok" not in st.session_state:
+        st.session_state.auth_ok = False
+
+    if not st.session_state.auth_ok:
+        st.markdown("### 🔐 Доступ к реестру")
+        st.write("Введите пароль для просмотра данных.")
+
+        with st.form("login_form", clear_on_submit=False):
+            pwd = st.text_input("Пароль", type="password")
+            submitted = st.form_submit_button("Войти")
+
+        if submitted:
+            if pwd == APP_PASSWORD:
+                st.session_state.auth_ok = True
+                st.success("Доступ разрешён.")
+                st.rerun()
+            else:
+                st.error("Неверный пароль.")
+
+        st.stop()
+
+
+# =============================
 # LOAD + PREPARE
 # =============================
 raw = load_data()
@@ -403,6 +455,9 @@ df = normalize_schema(raw)
 sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
 districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()])
 statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
+
+# Прочие — в самый низ списка отраслей
+sectors = move_prochie_to_bottom(sectors)
 
 sectors = ["Все"] + sectors
 districts = ["Все"] + districts
@@ -432,13 +487,16 @@ if status_sel != "Все":
     filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
 
 if q:
+
     def row_match(r):
-        s = " ".join([
-            str(r.get("name", "")),
-            str(r.get("address", "")),
-            str(r.get("responsible", "")),
-            str(r.get("id", "")),
-        ]).lower()
+        s = " ".join(
+            [
+                str(r.get("name", "")),
+                str(r.get("address", "")),
+                str(r.get("responsible", "")),
+                str(r.get("id", "")),
+            ]
+        ).lower()
         return q in s
 
     filtered = filtered[filtered.apply(row_match, axis=1)]
@@ -465,13 +523,13 @@ def render_card(row: pd.Series):
 
     btn_card = (
         f'<a class="a-btn" href="{card_url}" target="_blank">📄 Открыть карточку</a>'
-        if card_url and card_url != "—" else
-        '<span class="a-btn disabled">📄 Открыть карточку</span>'
+        if card_url and card_url != "—"
+        else '<span class="a-btn disabled">📄 Открыть карточку</span>'
     )
     btn_folder = (
         f'<a class="a-btn" href="{folder_url}" target="_blank">📁 Открыть папку</a>'
-        if folder_url and folder_url != "—" else
-        '<span class="a-btn disabled">📁 Открыть папку</span>'
+        if folder_url and folder_url != "—"
+        else '<span class="a-btn disabled">📁 Открыть папку</span>'
     )
 
     st.markdown(
@@ -501,12 +559,12 @@ def render_card(row: pd.Series):
   </div>
 </div>
 """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 
 # =============================
-# OUTPUT: ONE COLUMN (as requested)
+# OUTPUT: ONE COLUMN
 # =============================
 for _, r in filtered.iterrows():
     render_card(r)
