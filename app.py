@@ -1,426 +1,549 @@
 import os
-import io
 import base64
-from typing import Optional
-
 import pandas as pd
-import requests
 import streamlit as st
 
 
-# =========================
+# ----------------------------
 # CONFIG
-# =========================
+# ----------------------------
 st.set_page_config(
-    page_title="Реестр объектов — Курская область",
-    page_icon="🗂️",
+    page_title="Реестр объектов",
+    page_icon="📌",
     layout="wide",
 )
 
 APP_TITLE = "Министерство восстановления, развития приграничья и строительства Курской области"
 APP_SUBTITLE = "Реестр объектов"
 APP_DESC = "Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку."
-ASSETS_GERB_PATH = os.path.join("assets", "gerb.png")
-
-# Secrets
-CSV_URL = st.secrets.get("CSV_URL", "").strip()
-APP_PASSWORD = st.secrets.get("APP_PASSWORD", "").strip()
+DATA_PILL_TEXT = "Источник данных: Google Sheets (CSV)"
 
 
-# =========================
-# STYLES (Desktop + Mobile)
-# =========================
-def inject_css():
-    css = """
-    <style>
-      /* убрать лишние верхние отступы streamlit */
-      .block-container { padding-top: 1.2rem; padding-bottom: 2.2rem; }
-      header[data-testid="stHeader"] { background: transparent; }
-      /* иногда streamlit оставляет сверху пустое место */
-      div[data-testid="stToolbar"] { visibility: hidden; height: 0; position: fixed; }
-
-      /* HERO full-width фон (растянут на всю страницу), контент центрируется */
-      .hero-bg {
-        width: 100%;
-        background: radial-gradient(1400px 400px at 85% 30%, rgba(255,255,255,0.18), rgba(255,255,255,0) 60%),
-                    linear-gradient(135deg, #0b2a4a 0%, #0f3d73 55%, #184f92 100%);
-        border-radius: 18px;
-        box-shadow: 0 10px 30px rgba(0,0,0,.12);
-        padding: 18px 22px;
-        margin: 6px auto 18px auto;
-        position: relative;
-        overflow: hidden;
-      }
-      .hero-bubbles {
-        position:absolute; right:-110px; top:-70px;
-        width: 420px; height: 420px;
-        background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.26), rgba(255,255,255,0) 60%);
-        border-radius: 999px;
-        filter: blur(0px);
-        opacity: .9;
-      }
-      .hero-bubbles2 {
-        position:absolute; right:-40px; top:70px;
-        width: 260px; height: 260px;
-        background: radial-gradient(circle at 40% 40%, rgba(255,255,255,.18), rgba(255,255,255,0) 62%);
-        border-radius: 999px;
-        opacity: .9;
-      }
-      .hero-row { display:flex; gap:16px; align-items:flex-start; }
-      .hero-crest {
-        width: 62px; height: 62px; flex: 0 0 62px;
-        border-radius: 14px;
-        background: rgba(255,255,255,.10);
-        display:flex; align-items:center; justify-content:center;
-        border: 1px solid rgba(255,255,255,.14);
-      }
-      .hero-crest img { width: 46px; height: 46px; object-fit: contain; }
-      .hero-texts { color: #fff; min-width: 0; }
-      .hero-ministry { font-weight: 700; font-size: 18px; line-height: 1.25; }
-      .hero-app { font-weight: 700; font-size: 15px; opacity: .95; margin-top: 2px; }
-      .hero-desc { font-size: 12.5px; opacity: .90; margin-top: 6px; }
-      .hero-pill {
-        display:inline-flex; align-items:center; gap:8px;
-        margin-top: 10px;
-        background: rgba(255,255,255,.12);
-        border: 1px solid rgba(255,255,255,.14);
-        border-radius: 999px;
-        padding: 8px 12px;
-        font-size: 12px;
-        opacity: .98;
-      }
-
-      /* Filters wrapper */
-      .filters-wrap { margin-top: 2px; margin-bottom: 10px; }
-      .count-line { font-size: 12px; opacity: .75; margin: 10px 0 4px 0; }
-
-      /* Card (1 колонка) */
-      .card {
-        background: rgba(255,255,255,0.92);
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        border-radius: 16px;
-        box-shadow: 0 6px 16px rgba(0,0,0,.06);
-        padding: 14px 14px 12px 14px;
-        margin: 14px 0;
-        overflow: hidden; /* важно для мобилы */
-      }
-      .card-title {
-        font-size: 18px;
-        font-weight: 800;
-        line-height: 1.2;
-        margin: 2px 0 8px 0;
-        color: #0f172a;
-        word-break: break-word;
-      }
-      .card-id {
-        font-size: 12px;
-        opacity: .55;
-        margin-top: -2px;
-        margin-bottom: 10px;
-      }
-
-      .card-grid {
-        display:flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        background: rgba(15, 23, 42, 0.03);
-        border: 1px solid rgba(15, 23, 42, 0.06);
-        border-radius: 12px;
-        padding: 10px 10px;
-      }
-      .card-item {
-        display:flex; align-items:flex-start; gap:8px;
-        min-width: 220px;
-        flex: 1 1 220px;
-        color:#0f172a;
-      }
-      .card-item b { font-weight: 700; }
-      .card-item .ico { width: 18px; text-align:center; margin-top: 1px; }
-      .card-item .txt { min-width:0; word-break: break-word; }
-
-      .chips {
-        display:flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin: 10px 0 10px 0;
-      }
-      .chip {
-        display:inline-flex; align-items:center; gap:8px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: rgba(59, 130, 246, 0.08);
-        border: 1px solid rgba(59, 130, 246, 0.20);
-        font-size: 12px;
-        color: #0f172a;
-      }
-
-      .btn-row {
-        display:flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        margin-top: 6px;
-      }
-      .btn {
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        gap: 8px;
-        text-decoration:none !important;
-        padding: 12px 12px;
-        border-radius: 12px;
-        border: 1px solid rgba(15, 23, 42, 0.14);
-        background: rgba(255,255,255,0.92);
-        color: #0f172a !important;
-        font-weight: 700;
-        flex: 1 1 260px;
-        min-height: 44px;
-      }
-      .btn:hover { background: rgba(241,245,249,1); border-color: rgba(15, 23, 42, 0.22); }
-
-      .placeholder-note {
-        margin-top: 10px;
-        padding-top: 10px;
-        border-top: 1px dashed rgba(15, 23, 42, 0.18);
-        font-size: 12px;
-        opacity: .65;
-      }
-
-      /* Login card */
-      .login-wrap {
-        display:flex;
-        justify-content:center;
-        margin-top: 10px;
-      }
-      .login-card {
-        width: min(740px, 92vw);
-        background: rgba(255,255,255,0.92);
-        border: 1px solid rgba(15, 23, 42, 0.10);
-        border-radius: 18px;
-        box-shadow: 0 12px 28px rgba(0,0,0,.10);
-        padding: 16px 16px 14px 16px;
-      }
-      .login-title {
-        font-weight: 800;
-        font-size: 16px;
-        margin: 2px 0 2px 0;
-        color:#0f172a;
-      }
-      .login-sub { font-size: 12.5px; opacity:.75; margin-bottom: 10px; }
-
-      /* STREAMLIT WIDGETS: делаем ширину норм на мобиле */
-      div[data-testid="stSelectbox"] > div, div[data-testid="stTextInput"] > div {
-        border-radius: 12px !important;
-      }
-
-      /* MOBILE */
-      @media (max-width: 780px) {
-        .block-container { padding-left: 0.9rem; padding-right: 0.9rem; }
-        .hero-bg { padding: 16px 16px; border-radius: 18px; margin-bottom: 14px; }
-        .hero-row { gap: 12px; }
-        .hero-crest { width: 56px; height: 56px; flex:0 0 56px; }
-        .hero-crest img { width: 42px; height: 42px; }
-        .hero-ministry { font-size: 16px; }
-        .hero-app { font-size: 14px; }
-        .hero-desc { font-size: 12px; }
-
-        .card { padding: 12px 12px 10px 12px; border-radius: 16px; }
-        .card-title { font-size: 16px; }
-        .card-item { min-width: 100%; flex: 1 1 100%; } /* ключевой фикс — всё в столбик */
-        .btn { flex: 1 1 100%; } /* кнопки одна под другой */
-      }
-
-      /* DARK MODE (мобильный Android часто включает) */
-      @media (prefers-color-scheme: dark) {
-        body, .stApp { background: #0b1220; color: rgba(255,255,255,.92); }
-        .card, .login-card { background: rgba(17, 24, 39, 0.92); border-color: rgba(255,255,255,0.10); }
-        .card-title { color: rgba(255,255,255,.92); }
-        .card-grid { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
-        .card-item { color: rgba(255,255,255,.90); }
-        .chip { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.28); color: rgba(255,255,255,.92); }
-        .btn { background: rgba(17,24,39,0.92); border-color: rgba(255,255,255,0.12); color: rgba(255,255,255,.92) !important; }
-        .btn:hover { background: rgba(30,41,59,0.92); }
-      }
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
-
-
-# =========================
+# ----------------------------
 # HELPERS
-# =========================
-@st.cache_data(show_spinner=False, ttl=60)
-def load_bytes_from_url(url: str) -> Optional[bytes]:
-    if not url:
+# ----------------------------
+def _read_asset_b64(path: str) -> str | None:
+    """Read local image and return base64 string."""
+    if not os.path.exists(path):
         return None
-    try:
-        r = requests.get(url, timeout=25)
-        r.raise_for_status()
-        return r.content
-    except Exception:
-        return None
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
 
-def load_gerb_base64() -> str:
+def get_secret(key: str, default: str = "") -> str:
     try:
-        with open(ASSETS_GERB_PATH, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
+        return st.secrets.get(key, default)
     except Exception:
+        return default
+
+
+def normalize_str(x):
+    if pd.isna(x):
         return ""
+    return str(x).strip()
 
 
-@st.cache_data(show_spinner=False, ttl=60)
-def load_registry_df(csv_url: str) -> pd.DataFrame:
-    # 1) Google Sheets CSV (основной источник)
-    content = load_bytes_from_url(csv_url)
-    if content:
-        # иногда гугл отдаёт UTF-8, иногда с BOM — pandas обычно переварит
-        df = pd.read_csv(io.BytesIO(content))
-        return df
+def safe_col(df: pd.DataFrame, name: str) -> pd.Series:
+    if name in df.columns:
+        return df[name].fillna("").astype(str)
+    return pd.Series([""] * len(df))
 
-    # 2) fallback: если кто-то положит xlsx рядом (не обязательно)
-    for name in os.listdir("."):
-        if name.lower().endswith(".xlsx"):
+
+def load_data() -> pd.DataFrame:
+    """
+    Load data:
+    - Prefer CSV_URL from secrets
+    - If not exists, try local .xlsx
+    """
+    csv_url = get_secret("CSV_URL", "").strip()
+
+    if csv_url:
+        try:
+            df = pd.read_csv(csv_url)
+            return df
+        except Exception as e:
+            st.error(f"Не удалось загрузить CSV_URL. Ошибка: {e}")
+            return pd.DataFrame()
+
+    # fallback: local xlsx if exists
+    for fname in ["registry.xlsx", "data.xlsx", "реестр.xlsx", "reestr.xlsx"]:
+        if os.path.exists(fname):
             try:
-                return pd.read_excel(name)
-            except Exception:
-                pass
+                df = pd.read_excel(fname)
+                return df
+            except Exception as e:
+                st.error(f"Не удалось прочитать {fname}. Ошибка: {e}")
+                return pd.DataFrame()
 
     return pd.DataFrame()
 
 
-def norm(s: str) -> str:
-    return str(s).strip() if s is not None else ""
+def apply_global_css():
+    st.markdown(
+        """
+        <style>
+        /* Base */
+        .block-container { padding-top: 1.4rem; padding-bottom: 3rem; max-width: 1180px; }
+        @media (min-width: 1400px){ .block-container { max-width: 1240px; } }
+
+        /* Remove Streamlit default top padding a bit on mobile */
+        @media (max-width: 768px){
+          .block-container { padding-top: 0.8rem; }
+        }
+
+        /* Hero (Header) */
+        .hero-wrap{
+          margin: 8px auto 18px auto;
+          border-radius: 18px;
+          background: linear-gradient(135deg, #0b2b52 0%, #1b4c8c 55%, #2a5ea3 100%);
+          position: relative;
+          overflow: hidden;
+          box-shadow: 0 18px 40px rgba(0,0,0,0.18);
+        }
+        .hero-wrap:before{
+          content:'';
+          position:absolute;
+          right:-80px; top:-60px;
+          width:320px; height:320px;
+          background: rgba(255,255,255,0.14);
+          border-radius: 50%;
+          filter: blur(0px);
+        }
+        .hero-wrap:after{
+          content:'';
+          position:absolute;
+          right:40px; top:70px;
+          width:220px; height:220px;
+          background: rgba(255,255,255,0.10);
+          border-radius: 50%;
+        }
+        .hero{
+          padding: 18px 18px;
+          position: relative;
+          z-index: 2;
+        }
+        .hero-row{
+          display:flex;
+          gap:14px;
+          align-items:flex-start;
+        }
+        .hero-crest{
+          width:56px; height:56px;
+          border-radius: 12px;
+          background: rgba(255,255,255,0.10);
+          display:flex; align-items:center; justify-content:center;
+          flex: 0 0 56px;
+          border: 1px solid rgba(255,255,255,0.10);
+        }
+        .hero-crest img{ width:40px; height:40px; object-fit:contain; }
+
+        .hero-titles{ flex: 1; min-width: 0; }
+        .hero-ministry{
+          color: rgba(255,255,255,0.95);
+          font-weight: 800;
+          line-height: 1.15;
+          font-size: 18px;
+          margin-top: 2px;
+        }
+        .hero-app{
+          color: rgba(255,255,255,0.92);
+          font-weight: 700;
+          font-size: 14px;
+          margin-top: 6px;
+        }
+        .hero-sub{
+          color: rgba(255,255,255,0.82);
+          font-size: 13px;
+          margin-top: 6px;
+          max-width: 920px;
+        }
+        .hero-pill{
+          display:inline-flex;
+          align-items:center;
+          gap:10px;
+          margin-top: 10px;
+          padding: 8px 12px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,0.12);
+          color: rgba(255,255,255,0.92);
+          font-size: 12.5px;
+          width: fit-content;
+        }
+
+        /* Mobile header tweaks */
+        @media (max-width: 768px){
+          .hero-wrap{ border-radius: 16px; }
+          .hero{ padding: 16px 14px; }
+          .hero-ministry{ font-size: 20px; }
+          .hero-sub{ font-size: 13.5px; }
+        }
+
+        /* Login card */
+        .login-shell{
+          margin: 12px auto 0 auto;
+          max-width: 560px;
+        }
+        .login-card{
+          background: rgba(255,255,255,0.85);
+          border: 1px solid rgba(0,0,0,0.06);
+          border-radius: 16px;
+          padding: 16px 16px 8px 16px;
+          box-shadow: 0 14px 30px rgba(0,0,0,0.12);
+        }
+        .login-title{
+          font-weight: 800;
+          font-size: 16px;
+          margin-bottom: 4px;
+        }
+        .login-desc{
+          color: rgba(0,0,0,0.60);
+          font-size: 13px;
+          margin-bottom: 12px;
+        }
+
+        /* Cards */
+        .obj-card{
+          border: 1px solid rgba(0,0,0,0.08);
+          border-radius: 16px;
+          padding: 16px 16px 14px 16px;
+          background: #ffffff;
+          box-shadow: 0 10px 22px rgba(0,0,0,0.06);
+          margin-bottom: 14px;
+        }
+        .obj-title{
+          font-size: 20px;
+          font-weight: 900;
+          line-height: 1.15;
+          margin-bottom: 10px;
+        }
+        .obj-grid{
+          border: 1px solid rgba(0,0,0,0.06);
+          background: rgba(0,0,0,0.02);
+          border-radius: 14px;
+          padding: 12px;
+          margin-bottom: 10px;
+        }
+        .kv{
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px 14px;
+          align-items: start;
+        }
+        .kv-item{
+          display:flex;
+          gap: 8px;
+          align-items:flex-start;
+          min-width: 0;
+        }
+        .kv-ico{ width: 18px; flex: 0 0 18px; margin-top: 2px; }
+        .kv-label{
+          font-weight: 800;
+          color: rgba(0,0,0,0.70);
+          white-space: nowrap;
+        }
+        .kv-val{
+          color: rgba(0,0,0,0.82);
+          overflow-wrap:anywhere;
+        }
+
+        .obj-tags{
+          display:flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          margin: 6px 0 10px 0;
+        }
+        .pill{
+          display:inline-flex;
+          align-items:center;
+          gap:8px;
+          padding: 7px 12px;
+          border-radius: 999px;
+          background: rgba(34, 91, 170, 0.08);
+          border: 1px solid rgba(34, 91, 170, 0.20);
+          font-size: 12.5px;
+          font-weight: 800;
+          color: rgba(0,0,0,0.70);
+        }
+
+        .obj-actions{
+          display:grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-top: 6px;
+        }
+        .btn-like{
+          display:flex;
+          justify-content:center;
+          align-items:center;
+          gap:10px;
+          padding: 12px 14px;
+          border-radius: 12px;
+          border: 1px solid rgba(0,0,0,0.12);
+          background: rgba(0,0,0,0.02);
+          font-weight: 800;
+          text-decoration: none !important;
+          color: rgba(0,0,0,0.80) !important;
+        }
+        .btn-like:hover{
+          background: rgba(34, 91, 170, 0.08);
+          border-color: rgba(34, 91, 170, 0.30);
+        }
+
+        .obj-foot{
+          margin-top: 10px;
+          padding-top: 10px;
+          border-top: 1px dashed rgba(0,0,0,0.12);
+          color: rgba(0,0,0,0.55);
+          font-size: 12.5px;
+        }
+
+        /* Mobile: cards in one column, actions stacked */
+        @media (max-width: 768px){
+          .kv{ grid-template-columns: 1fr; }
+          .obj-actions{ grid-template-columns: 1fr; }
+          .obj-title{ font-size: 18px; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-def pick_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
-    cols = {c.lower(): c for c in df.columns}
-    for cand in candidates:
-        if cand.lower() in cols:
-            return cols[cand.lower()]
-    return None
+def render_hero(show_pill: bool):
+    crest_b64 = _read_asset_b64("assets/gerb.png") or ""
+    crest_img_html = ""
+    if crest_b64:
+        crest_img_html = f'<img src="data:image/png;base64,{crest_b64}" alt="герб"/>'
 
-
-def prepare_df(df_raw: pd.DataFrame) -> pd.DataFrame:
-    if df_raw is None or df_raw.empty:
-        return pd.DataFrame()
-
-    # Поддержка разных заголовков (на случай изменений)
-    col_id = pick_col(df_raw, ["id", "ID"])
-    col_sector = pick_col(df_raw, ["Отрасль", "sector"])
-    col_district = pick_col(df_raw, ["Район", "district"])
-    col_name = pick_col(df_raw, ["Наименование_объекта", "Наименование объекта", "name", "Объект", "object"])
-    col_address = pick_col(df_raw, ["Адрес", "address"])
-    col_resp = pick_col(df_raw, ["Ответственный", "responsible"])
-    col_status = pick_col(df_raw, ["Статус", "status"])
-    col_works = pick_col(df_raw, ["Работы", "works"])
-    col_card = pick_col(df_raw, ["Ссылка_на_карточку_(Google)", "Ссылка на карточку", "card_url", "card_url_text"])
-    col_folder = pick_col(df_raw, ["Ссылка_на_папку_(Drive)", "Ссылка на папку", "folder_url"])
-
-    # Сборка унифицированного DF
-    out = pd.DataFrame()
-    out["id"] = df_raw[col_id] if col_id else ""
-    out["sector"] = df_raw[col_sector] if col_sector else ""
-    out["district"] = df_raw[col_district] if col_district else ""
-    out["name"] = df_raw[col_name] if col_name else ""
-    out["address"] = df_raw[col_address] if col_address else ""
-    out["responsible"] = df_raw[col_resp] if col_resp else ""
-    out["status"] = df_raw[col_status] if col_status else ""
-    out["works"] = df_raw[col_works] if col_works else ""
-    out["card_url"] = df_raw[col_card] if col_card else ""
-    out["folder_url"] = df_raw[col_folder] if col_folder else ""
-
-    # чистка
-    for c in out.columns:
-        out[c] = out[c].astype(str).fillna("").map(norm)
-        out.loc[out[c].str.lower().isin(["nan", "none", "null"]), c] = ""
-
-    # если name пустой — НЕ подставляем id, оставляем пустым (чтобы видно было что надо заполнить)
-    # но для отображения заголовка карточки ниже подстрахуемся
-
-    return out
-
-
-def hero_html(gerb_b64: str, show_source: bool) -> str:
-    crest_img = ""
-    if gerb_b64:
-        crest_img = f'<img alt="gerb" src="data:image/png;base64,{gerb_b64}"/>'
-    else:
-        crest_img = '<span style="color:rgba(255,255,255,.85);font-weight:800;">Герб</span>'
-
-    pill = ""
-    if show_source:
-        pill = """
+    pill_html = ""
+    if show_pill:
+        pill_html = f"""
         <div class="hero-pill">
-          <span style="opacity:.95;">📄</span>
-          <span style="font-weight:700;">Источник данных:</span>
+          <span style="opacity:.95;">🗂</span>
+          <span style="font-weight:800;">Источник данных:</span>
           <span style="opacity:.95;">Google Sheets (CSV)</span>
         </div>
         """
 
-    return f"""
-    <div class="hero-bg">
-      <div class="hero-bubbles"></div>
-      <div class="hero-bubbles2"></div>
-      <div class="hero-row">
-        <div class="hero-crest">{crest_img}</div>
-        <div class="hero-texts">
-          <div class="hero-ministry">{APP_TITLE}</div>
-          <div class="hero-app">{APP_SUBTITLE}</div>
-          <div class="hero-desc">{APP_DESC}</div>
-          {pill}
+    hero_html = f"""
+    <div class="hero-wrap">
+      <div class="hero">
+        <div class="hero-row">
+          <div class="hero-crest">{crest_img_html}</div>
+          <div class="hero-titles">
+            <div class="hero-ministry">{APP_TITLE}</div>
+            <div class="hero-app">{APP_SUBTITLE}</div>
+            <div class="hero-sub">{APP_DESC}</div>
+            {pill_html}
+          </div>
         </div>
       </div>
     </div>
     """
+    st.markdown(hero_html, unsafe_allow_html=True)
 
 
-def render_card(row: pd.Series):
-    obj_id = row.get("id", "")
-    name = row.get("name", "")
-    sector = row.get("sector", "")
-    district = row.get("district", "")
-    address = row.get("address", "")
-    responsible = row.get("responsible", "")
-    status = row.get("status", "")
-    works = row.get("works", "")
-    card_url = row.get("card_url", "")
-    folder_url = row.get("folder_url", "")
+def password_gate() -> bool:
+    """
+    Returns True if user is authenticated.
+    Uses st.session_state["auth_ok"].
+    """
+    if "auth_ok" not in st.session_state:
+        st.session_state["auth_ok"] = False
 
-    title = name if name else (address if address else f"Объект {obj_id}" if obj_id else "Объект")
+    app_password = get_secret("APP_PASSWORD", "").strip()
+    # If no password set -> allow access (but лучше задавать всегда)
+    if not app_password:
+        st.session_state["auth_ok"] = True
+        return True
 
-    # Секции: если пусто — выводим "—" (чтобы карточка не разваливалась)
-    def show(v: str) -> str:
-        return v if v else "—"
+    if st.session_state["auth_ok"]:
+        return True
 
-    # Кнопки: если ссылки нет — делаем disabled-вид (но без ломания верстки)
-    def btn_html(label: str, icon: str, url: str) -> str:
-        if url and url != "—":
-            return f'<a class="btn" href="{url}" target="_blank" rel="noopener">{icon} {label}</a>'
-        return f'<div class="btn" style="opacity:.45; cursor:not-allowed;">{icon} {label}</div>'
+    # Login UI
+    st.markdown('<div class="login-shell">', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="login-card">
+          <div class="login-title">🔒 Доступ по паролю</div>
+          <div class="login-desc">Введите пароль для входа в реестр.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    pwd = st.text_input("Пароль", type="password", placeholder="Введите пароль…", label_visibility="collapsed")
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+    with col_btn2:
+        if st.button("Войти", use_container_width=True):
+            if pwd == app_password:
+                st.session_state["auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("Неверный пароль.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    return False
+
+
+def build_filters(df: pd.DataFrame):
+    # предполагаемые названия колонок (как у вас):
+    # Отрасль, Район, Статус, Наименование_объекта/Наименование объекта/Наименование, Адрес, Ответственный
+    col_sector = "Отрасль" if "Отрасль" in df.columns else None
+    col_area = "Район" if "Район" in df.columns else None
+
+    # статус может быть "Статус" или "Стадия/состояние" — подстрахуемся
+    if "Статус" in df.columns:
+        col_status = "Статус"
+    elif "Стадия/состояние" in df.columns:
+        col_status = "Стадия/состояние"
+    else:
+        col_status = None
+
+    # фильтры
+    sectors = ["Все"]
+    if col_sector:
+        sectors += sorted([x for x in df[col_sector].fillna("").astype(str).unique().tolist() if x.strip()])
+
+    # умный список районов (будет пересчитан после выбора отрасли)
+    st.markdown("####")  # небольшой отступ под шапкой
+
+    c1, c2, c3 = st.columns([1, 1, 1])
+
+    with c1:
+        sector_sel = st.selectbox("🏷️ Отрасль", options=sectors, index=0)
+
+    # пересчитываем районы по отрасли
+    df_for_area = df.copy()
+    if col_sector and sector_sel != "Все":
+        df_for_area = df_for_area[df_for_area[col_sector].astype(str) == sector_sel]
+
+    areas = ["Все"]
+    if col_area:
+        areas += sorted([x for x in df_for_area[col_area].fillna("").astype(str).unique().tolist() if x.strip()])
+
+    with c2:
+        area_sel = st.selectbox("📍 Район", options=areas, index=0)
+
+    statuses = ["Все"]
+    if col_status:
+        statuses += sorted([x for x in df[col_status].fillna("").astype(str).unique().tolist() if x.strip()])
+
+    with c3:
+        status_sel = st.selectbox("📌 Статус", options=statuses, index=0)
+
+    q = st.text_input("🔎 Поиск (наименование / адрес / ответственный)", value="")
+
+    return sector_sel, area_sel, status_sel, q, col_sector, col_area, col_status
+
+
+def filter_df(df: pd.DataFrame, sector_sel, area_sel, status_sel, q, col_sector, col_area, col_status):
+    out = df.copy()
+
+    if col_sector and sector_sel != "Все":
+        out = out[out[col_sector].astype(str) == sector_sel]
+
+    if col_area and area_sel != "Все":
+        out = out[out[col_area].astype(str) == area_sel]
+
+    if col_status and status_sel != "Все":
+        out = out[out[col_status].astype(str) == status_sel]
+
+    q = normalize_str(q)
+    if q:
+        # поля для поиска: наименование, адрес, ответственный
+        name_col = None
+        for cand in ["Наименование_объекта", "Наименование объекта", "Наименование", "Название", "name"]:
+            if cand in out.columns:
+                name_col = cand
+                break
+
+        addr_col = "Адрес" if "Адрес" in out.columns else None
+        resp_col = "Ответственный" if "Ответственный" in out.columns else None
+        id_col = "ID" if "ID" in out.columns else None
+
+        hay = pd.Series([""] * len(out))
+        if name_col:
+            hay = hay + " " + out[name_col].fillna("").astype(str)
+        if addr_col:
+            hay = hay + " " + out[addr_col].fillna("").astype(str)
+        if resp_col:
+            hay = hay + " " + out[resp_col].fillna("").astype(str)
+        if id_col:
+            hay = hay + " " + out[id_col].fillna("").astype(str)
+
+        out = out[hay.str.contains(q, case=False, na=False)]
+
+    return out
+
+
+def render_object_card(row: pd.Series):
+    # колонки (как в вашем реестре)
+    name_col = None
+    for cand in ["Наименование_объекта", "Наименование объекта", "Наименование", "Название", "name"]:
+        if cand in row.index:
+            name_col = cand
+            break
+
+    sector = normalize_str(row.get("Отрасль", ""))
+    area = normalize_str(row.get("Район", ""))
+    addr = normalize_str(row.get("Адрес", ""))
+    resp = normalize_str(row.get("Ответственный", ""))
+
+    # статус и работы — как раньше у вас
+    status = normalize_str(row.get("Статус", row.get("Стадия/состояние", "")))
+    works = normalize_str(row.get("Работы", row.get("Вид работ", "")))
+
+    # ссылки
+    card_url = normalize_str(row.get("Ссылка_на_карточку_(Google)", row.get("Ссылка_на_карточку", row.get("card_url", ""))))
+    folder_url = normalize_str(row.get("Ссылка_на_папку_(Drive)", row.get("Ссылка_на_папку", row.get("folder_url", ""))))
+
+    title = normalize_str(row.get(name_col, "Без названия")) if name_col else "Объект"
+
+    # Если нет работ/статуса — ставим прочерк
+    status_show = status if status else "—"
+    works_show = works if works else "—"
+
+    # карточка
     html = f"""
-    <div class="card">
-      <div class="card-title">{title}</div>
-      <div class="card-id">ID: {show(obj_id)}</div>
+    <div class="obj-card">
+      <div class="obj-title">{title}</div>
 
-      <div class="card-grid">
-        <div class="card-item"><div class="ico">🏷️</div><div class="txt"><b>Отрасль:</b> {show(sector)}</div></div>
-        <div class="card-item"><div class="ico">📍</div><div class="txt"><b>Район:</b> {show(district)}</div></div>
-        <div class="card-item"><div class="ico">🗺️</div><div class="txt"><b>Адрес:</b> {show(address)}</div></div>
-        <div class="card-item"><div class="ico">👤</div><div class="txt"><b>Ответственный:</b> {show(responsible)}</div></div>
+      <div class="obj-grid">
+        <div class="kv">
+          <div class="kv-item">
+            <div class="kv-ico">🏷️</div>
+            <div><span class="kv-label">Отрасль:</span> <span class="kv-val">{sector if sector else "—"}</span></div>
+          </div>
+
+          <div class="kv-item">
+            <div class="kv-ico">📍</div>
+            <div><span class="kv-label">Район:</span> <span class="kv-val">{area if area else "—"}</span></div>
+          </div>
+
+          <div class="kv-item">
+            <div class="kv-ico">🗺️</div>
+            <div><span class="kv-label">Адрес:</span> <span class="kv-val">{addr if addr else "—"}</span></div>
+          </div>
+
+          <div class="kv-item">
+            <div class="kv-ico">👤</div>
+            <div><span class="kv-label">Ответственный:</span> <span class="kv-val">{resp if resp else "—"}</span></div>
+          </div>
+        </div>
       </div>
 
-      <div class="chips">
-        <div class="chip">📌 <b>Статус:</b> {show(status)}</div>
-        <div class="chip">🛠️ <b>Работы:</b> {show(works)}</div>
+      <div class="obj-tags">
+        <div class="pill">📌 Статус: {status_show}</div>
+        <div class="pill">🛠️ Работы: {works_show}</div>
       </div>
 
-      <div class="btn-row">
-        {btn_html("Открыть карточку", "📄", card_url)}
-        {btn_html("Открыть папку", "📁", folder_url)}
+      <div class="obj-actions">
+        {f'<a class="btn-like" href="{card_url}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>' if card_url else '<div class="btn-like" style="opacity:.45; cursor:not-allowed;">📄 Карточка не указана</div>'}
+        {f'<a class="btn-like" href="{folder_url}" target="_blank" rel="noopener noreferrer">📁 Открыть папку</a>' if folder_url else '<div class="btn-like" style="opacity:.45; cursor:not-allowed;">📁 Папка не указана</div>'}
       </div>
 
-      <div class="placeholder-note">
+      <div class="obj-foot">
         Место под фото и дополнительные пункты (заполнишь в реестре — мы красиво выведем позже).
       </div>
     </div>
@@ -428,138 +551,33 @@ def render_card(row: pd.Series):
     st.markdown(html, unsafe_allow_html=True)
 
 
-# =========================
-# AUTH
-# =========================
-def is_authed() -> bool:
-    return bool(st.session_state.get("authed", False))
-
-
-def do_logout():
-    st.session_state["authed"] = False
-    st.session_state.pop("password_try", None)
-
-
-def auth_block(gerb_b64: str):
-    """
-    Экран входа: шапка как у вас, но БЕЗ "Источник данных".
-    """
-    st.markdown(hero_html(gerb_b64, show_source=False), unsafe_allow_html=True)
-
-    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
-    st.markdown('<div class="login-title">🔒 Доступ по паролю</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-sub">Введите пароль для входа в реестр.</div>', unsafe_allow_html=True)
-
-    pwd = st.text_input("Пароль", type="password", key="password_try", placeholder="Введите пароль…", label_visibility="collapsed")
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        ok = st.button("Войти", use_container_width=True)
-    with col2:
-        st.caption("")
-
-    if ok:
-        if not APP_PASSWORD:
-            st.error("Не задан APP_PASSWORD в Secrets. Добавь пароль в Secrets и перезапусти приложение.")
-            return
-        if pwd == APP_PASSWORD:
-            st.session_state["authed"] = True
-            st.rerun()
-        else:
-            st.error("Неверный пароль.")
-
-    st.markdown('</div></div>', unsafe_allow_html=True)
-
-
-# =========================
+# ----------------------------
 # APP
-# =========================
-def main():
-    inject_css()
-    gerb_b64 = load_gerb_base64()
+# ----------------------------
+apply_global_css()
 
-    # Если пароль включен (APP_PASSWORD задан) — требуем вход
-    if APP_PASSWORD and not is_authed():
-        auth_block(gerb_b64)
-        return
+# Шапка: на экране пароля pill НЕ показываем
+authed = password_gate()
+render_hero(show_pill=authed)
 
-    # MAIN HEADER (с источником)
-    st.markdown(hero_html(gerb_b64, show_source=True), unsafe_allow_html=True)
+if not authed:
+    # Ничего больше не рисуем
+    st.stop()
 
-    # Data
-    df_raw = load_registry_df(CSV_URL)
-    df = prepare_df(df_raw)
+# Данные
+df = load_data()
+if df.empty:
+    st.warning("Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets или наличие .xlsx в репозитории.")
+    st.stop()
 
-    if df.empty:
-        st.error("Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets или наличие .xlsx в репозитории.")
-        return
+# Фильтры
+sector_sel, area_sel, status_sel, q, col_sector, col_area, col_status = build_filters(df)
+filtered = filter_df(df, sector_sel, area_sel, status_sel, q, col_sector, col_area, col_status)
 
-    # Filters
-    st.markdown('<div class="filters-wrap">', unsafe_allow_html=True)
+# Счетчик
+st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
+st.markdown("<hr/>", unsafe_allow_html=True)
 
-    # Списки фильтров
-    sectors_all = sorted([s for s in df["sector"].unique().tolist() if s and s != "—"])
-    statuses_all = sorted([s for s in df["status"].unique().tolist() if s and s != "—"])
-
-    # 3 колонки фильтров (на мобиле Streamlit сам поставит вертикально)
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        sector_choice = st.selectbox("🏷️ Отрасль", options=["Все"] + sectors_all, index=0)
-
-    # ВАЖНО: район зависит от отрасли
-    df_for_districts = df.copy()
-    if sector_choice != "Все":
-        df_for_districts = df_for_districts[df_for_districts["sector"] == sector_choice]
-
-    districts_all = sorted([d for d in df_for_districts["district"].unique().tolist() if d and d != "—"])
-
-    with c2:
-        district_choice = st.selectbox("📍 Район", options=["Все"] + districts_all, index=0)
-
-    with c3:
-        status_choice = st.selectbox("📌 Статус", options=["Все"] + statuses_all, index=0)
-
-    q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="", placeholder="", label_visibility="visible")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Apply filters
-    dff = df.copy()
-
-    if sector_choice != "Все":
-        dff = dff[dff["sector"] == sector_choice]
-
-    if district_choice != "Все":
-        dff = dff[dff["district"] == district_choice]
-
-    if status_choice != "Все":
-        dff = dff[dff["status"] == status_choice]
-
-    if q.strip():
-        qq = q.strip().lower()
-        mask = (
-            dff["name"].str.lower().str.contains(qq, na=False)
-            | dff["address"].str.lower().str.contains(qq, na=False)
-            | dff["responsible"].str.lower().str.contains(qq, na=False)
-            | dff["id"].str.lower().str.contains(qq, na=False)
-        )
-        dff = dff[mask]
-
-    st.markdown(f'<div class="count-line">Показано объектов: {len(dff)} из {len(df)}</div>', unsafe_allow_html=True)
-    st.divider()
-
-    # Render cards (ОДНА КОЛОНКА — как вы хотели)
-    for _, row in dff.iterrows():
-        render_card(row)
-
-    # (опционально) кнопка выхода — если пароль включен
-    if APP_PASSWORD:
-        st.caption("")
-        if st.button("Выйти", use_container_width=False):
-            do_logout()
-            st.rerun()
-
-
-if __name__ == "__main__":
-    main()
+# Рендер карточек: одна колонка (как ты просил)
+for _, row in filtered.iterrows():
+    render_object_card(row)
