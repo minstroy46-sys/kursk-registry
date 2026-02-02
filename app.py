@@ -79,6 +79,24 @@ def move_prochie_to_bottom(items: list[str]) -> list[str]:
     return rest + prochie
 
 
+def status_class(status_text: str) -> str:
+    """
+    CSS-класс для подсветки статуса:
+    - строительство -> зеленый
+    - проектирование -> желтый
+    - остановлено/приостановлено -> красный
+    Остальные — без цвета.
+    """
+    s = norm_col(status_text)
+    if "строитель" in s:
+        return "status status-green"
+    if "проектир" in s:
+        return "status status-yellow"
+    if "останов" in s or "приостанов" in s:
+        return "status status-red"
+    return "status"
+
+
 # =============================
 # DATA LOADING
 # =============================
@@ -324,6 +342,27 @@ header {visibility: hidden;}
   color: rgba(15, 23, 42, .90);
 }
 
+/* ===== STATUS COLORS (soft, not harsh) ===== */
+.tag.status{ font-weight: 800; }
+
+.tag.status-green{
+  background: rgba(34, 197, 94, .10);
+  border-color: rgba(34, 197, 94, .22);
+  color: rgba(15, 23, 42, .92);
+}
+
+.tag.status-yellow{
+  background: rgba(245, 158, 11, .12);
+  border-color: rgba(245, 158, 11, .25);
+  color: rgba(15, 23, 42, .92);
+}
+
+.tag.status-red{
+  background: rgba(239, 68, 68, .10);
+  border-color: rgba(239, 68, 68, .22);
+  color: rgba(15, 23, 42, .92);
+}
+
 .card-actions{
   display:flex;
   gap: 12px;
@@ -377,7 +416,7 @@ header {visibility: hidden;}
 
 
 # =============================
-# HERO (unchanged)
+# HERO (unchanged, без источника данных)
 # =============================
 crest_html = ""
 if crest_b64:
@@ -402,7 +441,6 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
-
 
 
 # =============================
@@ -545,7 +583,7 @@ def render_card(row: pd.Series):
   </div>
 
   <div class="card-tags">
-    <span class="tag">📌 <b>Статус:</b> {status}</span>
+    <span class="tag {status_class(status)}">📌 <b>Статус:</b> {status}</span>
     <span class="tag">🛠️ <b>Работы:</b> {work_flag}</span>
   </div>
 
