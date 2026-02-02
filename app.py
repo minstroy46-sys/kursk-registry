@@ -10,6 +10,7 @@ import streamlit as st
 # НАСТРОЙКИ
 # =========================
 CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwA5g3ZuBmZlY3vQMbc7nautnpK7c4ioKtTYU_mTskZb6A6nJ_yeokKIvfbVBFH1jTPpzOgoBMD89n/pub?gid=372714191&single=true&output=csv"
+
 APP_TITLE = "Министерство восстановления, развития приграничья и строительства Курской области"
 APP_SUBTITLE = "Реестр объектов"
 APP_DESC = "Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку."
@@ -33,6 +34,25 @@ def esc(x) -> str:
     return html.escape(s)
 
 
+def normalize_text(x) -> str:
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    s = str(x).strip()
+    if not s or s.lower() == "nan":
+        return ""
+    return s
+
+
+def normalize_url(x) -> str:
+    s = normalize_text(x)
+    return s
+
+
 def read_image_b64(path: str) -> str:
     p = Path(path)
     if not p.exists():
@@ -40,7 +60,8 @@ def read_image_b64(path: str) -> str:
     return base64.b64encode(p.read_bytes()).decode("utf-8")
 
 
-def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+def pick_col_exact(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Exact match (case-insensitive)."""
     lower_map = {c.lower(): c for c in df.columns}
     for cand in candidates:
         if cand in df.columns:
@@ -51,33 +72,45 @@ def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
     return None
 
 
-def normalize_url(x) -> str:
-    s = str(x or "").strip()
-    if not s or s.lower() == "nan":
-        return ""
-    return s
+def pick_col_fuzzy(df: pd.DataFrame, keywords: list[str]) -> str | None:
+    """Fuzzy match: finds first column that contains any keyword (case-insensitive)."""
+    cols = list(df.columns)
+    cols_l = [c.lower() for c in cols]
+    for kw in keywords:
+        kw = kw.lower()
+        for i, c in enumerate(cols_l):
+            if kw in c:
+                return cols[i]
+    return None
+
+
+def pick_col(df: pd.DataFrame, exact_candidates: list[str], fuzzy_keywords: list[str]) -> str | None:
+    """Try exact candidates first, then fuzzy keywords."""
+    c = pick_col_exact(df, exact_candidates)
+    if c:
+        return c
+    return pick_col_fuzzy(df, fuzzy_keywords)
 
 
 def ordered_districts(values: list[str]) -> list[str]:
     clean = []
     for v in values:
-        if v is None:
-            continue
-        s = str(v).strip()
-        if not s or s.lower() == "nan":
-            continue
-        clean.append(s)
+        s = normalize_text(v)
+        if s:
+            clean.append(s)
 
-    # unique
+    # unique keep order
     clean = list(dict.fromkeys(clean))
 
     first = []
+    # 1) Курск
     for prefer in ["г. Курск", "Курск"]:
         if prefer in clean:
             first.append(prefer)
             clean.remove(prefer)
             break
 
+    # 2) Курский район
     for prefer in ["Курский район", "Курский р-н", "Курский р-он"]:
         if prefer in clean:
             first.append(prefer)
@@ -315,16 +348,95 @@ def load_data(url: str) -> pd.DataFrame:
 
 df = load_data(CSV_URL)
 
-col_id = pick_col(df, ["ID", "id", "Код", "Код объекта", "Шифр", "Номер"])
-col_name = pick_col(df, ["Наименование", "Название", "Объект", "Наименование объекта"])
-col_sector = pick_col(df, ["Отрасль", "Сфера", "Направление"])
-col_district = pick_col(df, ["Район", "Муниципалитет", "МО", "Территория"])
-col_address = pick_col(df, ["Адрес", "Местоположение", "Адрес объекта"])
-col_resp = pick_col(df, ["Ответственный", "Куратор", "Ответственные"])
-col_status = pick_col(df, ["Статус", "Состояние", "Стадия"])
-col_works = pick_col(df, ["Работы", "Работы?", "Выполнение", "Строительство"])
-col_card_url = pick_col(df, ["Ссылка на карточку", "Карточка", "Card URL", "card_url", "URL карточки"])
-col_folder_url = pick_col(df, ["Ссылка на папку", "Папка", "Folder URL", "folder_url", "URL папки"])
+
+# =========================
+# COLUMN DETECTION (EXACT + FUZZY)
+# =========================
+col_id = pick_col(
+    df,
+    exact_candidates=["ID", "id", "Код", "Код объекта", "Шифр", "Номер", "№"],
+    fuzzy_keywords=["id", "код", "шифр", "номер", "№"],
+)
+
+col_name = pick_col(
+    df,
+    exact_candidates=["Наименование", "Название", "Объект", "Наименование объекта", "Наименование мероприятия"],
+    fuzzy_keywords=["наимен", "назван", "объект"],
+)
+
+col_sector = pick_col(
+    df,
+    exact_candidates=["Отрасль", "Сфера", "Направление"],
+    fuzzy_keywords=["отрасл", "сфера", "направлен"],
+)
+
+col_district = pick_col(
+    df,
+    exact_candidates=["Район", "Муниципалитет", "МО", "Территория", "Муниципальное образование"],
+    fuzzy_keywords=["район", "муниц", "мо", "террит"],
+)
+
+col_address = pick_col(
+    df,
+    exact_candidates=["Адрес", "Местоположение", "Адрес объекта"],
+    fuzzy_keywords=["адрес", "местопол"],
+)
+
+col_resp = pick_col(
+    df,
+    exact_candidates=["Ответственный", "Куратор", "Ответственные", "Ответственный куратор"],
+    fuzzy_keywords=["ответств", "куратор"],
+)
+
+col_status = pick_col(
+    df,
+    exact_candidates=["Статус", "Состояние", "Стадия", "Стадия/состояние"],
+    fuzzy_keywords=["статус", "состоя", "стад"],
+)
+
+col_works = pick_col(
+    df,
+    exact_candidates=["Работы", "Выполнение", "Строительство", "Работы (да/нет)"],
+    fuzzy_keywords=["работ", "выполн", "строит"],
+)
+
+col_card_url = pick_col(
+    df,
+    exact_candidates=["Ссылка на карточку", "Карточка", "Card URL", "card_url", "URL карточки"],
+    fuzzy_keywords=["карточ", "card", "url карточ"],
+)
+
+col_folder_url = pick_col(
+    df,
+    exact_candidates=["Ссылка на папку", "Папка", "Folder URL", "folder_url", "URL папки"],
+    fuzzy_keywords=["папк", "folder", "url папк"],
+)
+
+
+# =========================
+# SIDEBAR DEBUG (чтобы больше не “слетало” молча)
+# =========================
+with st.sidebar:
+    st.subheader("Диагностика")
+    st.write("Найденные столбцы:")
+    st.code(
+        "\n".join(
+            [
+                f"name: {col_name}",
+                f"sector: {col_sector}",
+                f"district: {col_district}",
+                f"address: {col_address}",
+                f"responsible: {col_resp}",
+                f"status: {col_status}",
+                f"works: {col_works}",
+                f"card_url: {col_card_url}",
+                f"folder_url: {col_folder_url}",
+                f"id: {col_id}",
+            ]
+        )
+    )
+    with st.expander("Показать все названия столбцов (df.columns)"):
+        st.write(list(df.columns))
 
 
 # =========================
@@ -446,7 +558,9 @@ st.divider()
 # RENDER CARDS
 # =========================
 def render_card(row: pd.Series):
+    # имя
     name = esc(row[col_name]) if col_name else "Объект"
+
     sector = esc(row[col_sector]) if col_sector else "—"
     district = esc(row[col_district]) if col_district else "—"
     address = esc(row[col_address]) if col_address else "—"
