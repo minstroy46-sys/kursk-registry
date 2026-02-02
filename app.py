@@ -22,12 +22,13 @@ def esc(x) -> str:
     """Safe HTML escape + NaN/None -> '—'."""
     if x is None:
         return "—"
-    if isinstance(x, float) and pd.isna(x):
-        return "—"
-    if pd.isna(x):
-        return "—"
+    try:
+        if pd.isna(x):
+            return "—"
+    except Exception:
+        pass
     s = str(x).strip()
-    if s == "" or s.lower() == "nan":
+    if not s or s.lower() == "nan":
         return "—"
     return html.escape(s)
 
@@ -36,39 +37,47 @@ def read_image_b64(path: str) -> str:
     p = Path(path)
     if not p.exists():
         return ""
-    data = p.read_bytes()
-    return base64.b64encode(data).decode("utf-8")
+    return base64.b64encode(p.read_bytes()).decode("utf-8")
 
 
 def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    """Возвращает первый найденный столбец из списка кандидатов."""
     lower_map = {c.lower(): c for c in df.columns}
     for cand in candidates:
         if cand in df.columns:
             return cand
-        if cand.lower() in lower_map:
-            return lower_map[cand.lower()]
+        lc = cand.lower()
+        if lc in lower_map:
+            return lower_map[lc]
     return None
 
 
-def normalize_url(x: str) -> str:
-    s = (x or "").strip()
+def normalize_url(x) -> str:
+    s = str(x or "").strip()
     if not s or s.lower() == "nan":
         return ""
     return s
 
 
 def ordered_districts(values: list[str]) -> list[str]:
-    """Курск -> Курский район -> остальное по алфавиту."""
-    clean = [v for v in values if v and str(v).strip() and str(v).lower() != "nan"]
-    clean = list(dict.fromkeys([str(v).strip() for v in clean]))  # unique preserve
-    # точные приоритеты
+    clean = []
+    for v in values:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if not s or s.lower() == "nan":
+            continue
+        clean.append(s)
+
+    # unique
+    clean = list(dict.fromkeys(clean))
+
     first = []
     for prefer in ["г. Курск", "Курск"]:
         if prefer in clean:
             first.append(prefer)
             clean.remove(prefer)
             break
+
     for prefer in ["Курский район", "Курский р-н", "Курский р-он"]:
         if prefer in clean:
             first.append(prefer)
@@ -92,23 +101,28 @@ GERB_B64 = read_image_b64("assets/gerb.png")
 
 
 # =========================
-# CSS (адаптив + светлая/тёмная тема)
+# CSS (адаптив + светлая/тёмная тема + скрытие футера)
 # =========================
 st.markdown(
     """
 <style>
-/* Стабильные отступы контейнера */
+/* контейнер */
 .main .block-container{
     padding-top: 1.2rem;
     padding-bottom: 2.2rem;
     max-width: 1200px;
 }
 
+/* --- попытка убрать нижнюю подпись Streamlit (футер) --- */
+footer {visibility: hidden;}
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+
 /* ===== HERO ===== */
 .hero-wrap{
     width: 100%;
     border-radius: 18px;
-    overflow: hidden;            /* важно: ничего не "режет" углы */
+    overflow: hidden;
     box-shadow: 0 14px 30px rgba(0,0,0,.12);
     background: linear-gradient(135deg, #0f2a57 0%, #1a3f7d 45%, #0e2b5e 100%);
     position: relative;
@@ -154,10 +168,7 @@ st.markdown(
     display:block;
 }
 
-.hero-text{
-    flex: 1 1 auto;
-    min-width: 0;
-}
+.hero-text{ flex: 1 1 auto; min-width: 0; }
 
 .hero-ministry{
     font-size: 22px;
@@ -196,11 +207,8 @@ st.markdown(
     font-size: 12px;
 }
 
-/* ===== FILTER LABELS ===== */
-.filter-label{
-    font-weight: 700;
-    margin: 2px 0 6px 0;
-}
+/* labels */
+.filter-label{ font-weight: 700; margin: 2px 0 6px 0; }
 
 /* ===== CARDS ===== */
 .card{
@@ -232,10 +240,7 @@ st.markdown(
     font-size: 13px;
     line-height: 1.35;
 }
-.meta-ico{
-    width: 18px;
-    flex: 0 0 auto;
-}
+.meta-ico{ width: 18px; flex: 0 0 auto; }
 
 .badges{
     display:flex;
@@ -255,7 +260,7 @@ st.markdown(
     font-size: 12px;
 }
 
-/* ===== MOBILE ===== */
+/* MOBILE */
 @media (max-width: 640px){
     .main .block-container{
         padding-top: .8rem;
@@ -263,54 +268,31 @@ st.markdown(
         padding-right: .9rem;
     }
     .hero{
-        flex-wrap: wrap;             /* ключевое: не режет */
+        flex-wrap: wrap;
         justify-content: flex-start;
         padding: 16px 16px;
     }
-    .hero-logo{
-        width: 80px;
-        height: 80px;
-        border-radius: 14px;
-    }
-    .hero-logo img{
-        width: 60px;
-        height: 60px;
-    }
-    .hero-ministry{
-        font-size: 18px;             /* на телефоне компактнее */
-    }
-    .hero-app{
-        font-size: 16px;
-        margin-bottom: 8px;
-    }
-    .hero-desc{
-        font-size: 12.5px;
-    }
+    .hero-logo{ width: 80px; height: 80px; border-radius: 14px; }
+    .hero-logo img{ width: 60px; height: 60px; }
+    .hero-ministry{ font-size: 18px; }
+    .hero-app{ font-size: 16px; margin-bottom: 8px; }
+    .hero-desc{ font-size: 12.5px; }
 }
 
-/* ===== DARK MODE (телефон часто включает) ===== */
+/* DARK MODE */
 @media (prefers-color-scheme: dark){
-    /* фон и текст в целом */
-    .main{
-        background: #0b1220 !important;
-        color: rgba(255,255,255,.92) !important;
-    }
-    /* карточки и мета */
+    .main{ background: #0b1220 !important; color: rgba(255,255,255,.92) !important; }
     .card{
         background: rgba(17,27,46,.85) !important;
         border: 1px solid rgba(255,255,255,.10) !important;
         box-shadow: 0 10px 22px rgba(0,0,0,.35) !important;
     }
-    .card-title{
-        color: rgba(255,255,255,.96) !important;
-    }
+    .card-title{ color: rgba(255,255,255,.96) !important; }
     .meta{
         background: rgba(255,255,255,.06) !important;
         border: 1px solid rgba(255,255,255,.10) !important;
     }
-    .meta-row{
-        color: rgba(255,255,255,.90) !important;
-    }
+    .meta-row{ color: rgba(255,255,255,.90) !important; }
     .badge{
         background: rgba(255,255,255,.06) !important;
         border: 1px solid rgba(255,255,255,.12) !important;
@@ -328,15 +310,11 @@ st.markdown(
 # =========================
 @st.cache_data(ttl=300)
 def load_data(url: str) -> pd.DataFrame:
-    df = pd.read_csv(url)
-    # Унификация пустых
-    df = df.replace({pd.NA: None})
-    return df
+    return pd.read_csv(url)
 
 
 df = load_data(CSV_URL)
 
-# Подбираем основные колонки максимально "устойчиво" (на случай изменений в таблице)
 col_id = pick_col(df, ["ID", "id", "Код", "Код объекта", "Шифр", "Номер"])
 col_name = pick_col(df, ["Наименование", "Название", "Объект", "Наименование объекта"])
 col_sector = pick_col(df, ["Отрасль", "Сфера", "Направление"])
@@ -348,21 +326,15 @@ col_works = pick_col(df, ["Работы", "Работы?", "Выполнение
 col_card_url = pick_col(df, ["Ссылка на карточку", "Карточка", "Card URL", "card_url", "URL карточки"])
 col_folder_url = pick_col(df, ["Ссылка на папку", "Папка", "Folder URL", "folder_url", "URL папки"])
 
-# Если каких-то колонок нет — сделаем "пустые", чтобы приложение не падало
-for c in [col_name, col_sector, col_district, col_address, col_resp, col_status, col_works, col_card_url, col_folder_url]:
-    if c is None:
-        pass
-
 
 # =========================
-# HERO (шапка)
+# HERO
 # =========================
-logo_html = ""
-if GERB_B64:
-    logo_html = f'<div class="hero-logo"><img alt="Герб" src="data:image/png;base64,{GERB_B64}"/></div>'
-else:
-    # если файла нет — оставим аккуратный плейсхолдер
-    logo_html = '<div class="hero-logo">🏛️</div>'
+logo_html = (
+    f'<div class="hero-logo"><img alt="Герб" src="data:image/png;base64,{GERB_B64}"/></div>'
+    if GERB_B64
+    else '<div class="hero-logo">🏛️</div>'
+)
 
 st.markdown(
     f"""
@@ -385,7 +357,7 @@ st.write("")
 
 
 # =========================
-# FILTERS
+# FILTERS (ВАЖНО: key у каждого виджета!)
 # =========================
 c1, c2, c3 = st.columns(3)
 
@@ -397,7 +369,13 @@ with c1:
             [s for s in df[col_sector].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
             key=lambda x: x.lower(),
         )
-    sector_sel = st.selectbox("", sectors, index=0)
+    sector_sel = st.selectbox(
+        "Отрасль",
+        sectors,
+        index=0,
+        key="sector_sel",
+        label_visibility="collapsed",
+    )
 
 with c2:
     st.markdown('<div class="filter-label">📍 Район</div>', unsafe_allow_html=True)
@@ -405,7 +383,13 @@ with c2:
     if col_district:
         raw = df[col_district].dropna().astype(str).str.strip().tolist()
         districts += ordered_districts(raw)
-    district_sel = st.selectbox("", districts, index=0)
+    district_sel = st.selectbox(
+        "Район",
+        districts,
+        index=0,
+        key="district_sel",
+        label_visibility="collapsed",
+    )
 
 with c3:
     st.markdown('<div class="filter-label">📌 Статус</div>', unsafe_allow_html=True)
@@ -415,10 +399,22 @@ with c3:
             [s for s in df[col_status].dropna().astype(str).str.strip().unique() if s and s.lower() != "nan"],
             key=lambda x: x.lower(),
         )
-    status_sel = st.selectbox("", statuses, index=0)
+    status_sel = st.selectbox(
+        "Статус",
+        statuses,
+        index=0,
+        key="status_sel",
+        label_visibility="collapsed",
+    )
 
 st.markdown('<div class="filter-label">🔎 Поиск (наименование / адрес / ответственный / id)</div>', unsafe_allow_html=True)
-q = st.text_input("", value="").strip().lower()
+q = st.text_input(
+    "Поиск",
+    value="",
+    key="search_q",
+    label_visibility="collapsed",
+).strip().lower()
+
 
 # =========================
 # APPLY FILTERS
@@ -450,7 +446,6 @@ st.divider()
 # RENDER CARDS
 # =========================
 def render_card(row: pd.Series):
-    oid = esc(row[col_id]) if col_id else ""
     name = esc(row[col_name]) if col_name else "Объект"
     sector = esc(row[col_sector]) if col_sector else "—"
     district = esc(row[col_district]) if col_district else "—"
@@ -459,16 +454,13 @@ def render_card(row: pd.Series):
     status = esc(row[col_status]) if col_status else "—"
     works = esc(row[col_works]) if col_works else "—"
 
-    card_url = normalize_url(str(row[col_card_url])) if col_card_url else ""
-    folder_url = normalize_url(str(row[col_folder_url])) if col_folder_url else ""
-
-    # Заголовок: ID не показываем (как вы хотели), но поиск по id работает.
-    title = name
+    card_url = normalize_url(row[col_card_url]) if col_card_url else ""
+    folder_url = normalize_url(row[col_folder_url]) if col_folder_url else ""
 
     st.markdown(
         f"""
 <div class="card">
-  <div class="card-title">{title}</div>
+  <div class="card-title">{name}</div>
   <div class="meta">
     <div class="meta-row"><span class="meta-ico">🏷️</span><span><b>Отрасль:</b> {sector}</span></div>
     <div class="meta-row"><span class="meta-ico">📍</span><span><b>Район:</b> {district}</span></div>
@@ -498,11 +490,8 @@ def render_card(row: pd.Series):
             st.button("📁 Открыть папку", disabled=True, use_container_width=True, help="Ссылка не заполнена")
 
 
-# Выводим в 2 колонки (на мобиле Streamlit сам перестраивает вниз)
 left, right = st.columns(2)
 
-rows = list(view.itertuples(index=False, name=None))
-# itertuples не даёт Series, поэтому делаем через view.iterrows для простоты и стабильности
 for i, (_, r) in enumerate(view.iterrows()):
     target = left if i % 2 == 0 else right
     with target:
