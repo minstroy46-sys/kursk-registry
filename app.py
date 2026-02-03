@@ -79,6 +79,31 @@ def move_prochie_to_bottom(items: list[str]) -> list[str]:
     return rest + prochie
 
 
+def status_class(status_text: str) -> str:
+    """
+    CSS-класс для подсветки статуса (мягко, без "кислоты"):
+    - "строительство остановлено" / "остановлено" / "приостановлено" -> красный (приоритет)
+    - проектирование -> желтый
+    - строительство -> зеленый
+    Остальные — без цвета.
+    """
+    s = norm_col(status_text)
+
+    # 1) СНАЧАЛА проверяем остановку (важно для "строительство остановлено")
+    if "останов" in s or "приостанов" in s:
+        return "status status-red"
+
+    # 2) Проектирование
+    if "проектир" in s:
+        return "status status-yellow"
+
+    # 3) Строительство
+    if "строитель" in s:
+        return "status status-green"
+
+    return "status"
+
+
 # =============================
 # DATA LOADING
 # =============================
@@ -250,19 +275,6 @@ header {visibility: hidden;}
   color: rgba(255,255,255,.78);
   font-size: 13px;
 }
-.pill{
-  margin-top: 10px;
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.16);
-  background: rgba(255,255,255,.08);
-  color: rgba(255,255,255,.90);
-  font-size: 12px;
-  font-weight: 700;
-}
 
 /* make title stay on one line as much as possible */
 @media (max-width: 900px){
@@ -324,6 +336,27 @@ header {visibility: hidden;}
   color: rgba(15, 23, 42, .90);
 }
 
+/* ===== STATUS COLORS (soft, not harsh) ===== */
+.tag.status{ font-weight: 800; }
+
+.tag.status-green{
+  background: rgba(34, 197, 94, .10);
+  border-color: rgba(34, 197, 94, .22);
+  color: rgba(15, 23, 42, .92);
+}
+
+.tag.status-yellow{
+  background: rgba(245, 158, 11, .12);
+  border-color: rgba(245, 158, 11, .25);
+  color: rgba(15, 23, 42, .92);
+}
+
+.tag.status-red{
+  background: rgba(239, 68, 68, .09);
+  border-color: rgba(239, 68, 68, .20);
+  color: rgba(15, 23, 42, .92);
+}
+
 .card-actions{
   display:flex;
   gap: 12px;
@@ -377,7 +410,7 @@ header {visibility: hidden;}
 
 
 # =============================
-# HERO (unchanged)
+# HERO (unchanged, без источника данных)
 # =============================
 crest_html = ""
 if crest_b64:
@@ -402,7 +435,6 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
-
 
 
 # =============================
@@ -545,7 +577,7 @@ def render_card(row: pd.Series):
   </div>
 
   <div class="card-tags">
-    <span class="tag">📌 <b>Статус:</b> {status}</span>
+    <span class="tag {status_class(status)}">📌 <b>Статус:</b> {status}</span>
     <span class="tag">🛠️ <b>Работы:</b> {work_flag}</span>
   </div>
 
