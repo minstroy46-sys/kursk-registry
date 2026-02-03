@@ -81,19 +81,26 @@ def move_prochie_to_bottom(items: list[str]) -> list[str]:
 
 def status_class(status_text: str) -> str:
     """
-    CSS-класс для подсветки статуса:
-    - строительство -> зеленый
+    CSS-класс для подсветки статуса (мягко, без "кислоты"):
+    - "строительство остановлено" / "остановлено" / "приостановлено" -> красный (приоритет)
     - проектирование -> желтый
-    - остановлено/приостановлено -> красный
+    - строительство -> зеленый
     Остальные — без цвета.
     """
     s = norm_col(status_text)
-    if "строитель" in s:
-        return "status status-green"
-    if "проектир" in s:
-        return "status status-yellow"
+
+    # 1) СНАЧАЛА проверяем остановку (важно для "строительство остановлено")
     if "останов" in s or "приостанов" in s:
         return "status status-red"
+
+    # 2) Проектирование
+    if "проектир" in s:
+        return "status status-yellow"
+
+    # 3) Строительство
+    if "строитель" in s:
+        return "status status-green"
+
     return "status"
 
 
@@ -268,19 +275,6 @@ header {visibility: hidden;}
   color: rgba(255,255,255,.78);
   font-size: 13px;
 }
-.pill{
-  margin-top: 10px;
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.16);
-  background: rgba(255,255,255,.08);
-  color: rgba(255,255,255,.90);
-  font-size: 12px;
-  font-weight: 700;
-}
 
 /* make title stay on one line as much as possible */
 @media (max-width: 900px){
@@ -358,8 +352,8 @@ header {visibility: hidden;}
 }
 
 .tag.status-red{
-  background: rgba(239, 68, 68, .10);
-  border-color: rgba(239, 68, 68, .22);
+  background: rgba(239, 68, 68, .09);
+  border-color: rgba(239, 68, 68, .20);
   color: rgba(15, 23, 42, .92);
 }
 
