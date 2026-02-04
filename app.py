@@ -1,7 +1,7 @@
 import base64
 import re
-from pathlib import Path
 from datetime import datetime, date
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -11,9 +11,6 @@ import streamlit as st
 # CONFIG
 # =============================
 st.set_page_config(page_title="Реестр объектов", layout="wide")
-
-# Ваш CSV (по умолчанию). Можно переопределить в Secrets: CSV_URL
-DEFAULT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwA5g3ZuBmZlY3vQMbc7nautnpK7c4ioKtTYU_mTskZb6A6nJ_yeokKIvfbVBFH1jTPpzOgoBMD89n/pub?gid=1858741677&single=true&output=csv"
 
 
 # =============================
@@ -28,9 +25,9 @@ def safe_text(v, fallback="—"):
     except Exception:
         pass
     s = str(v).strip()
-    if s.lower() in ("nan", "none", "null", "#n/a", "#ref!"):
+    if s.lower() in ("nan", "none", "null", ""):
         return fallback
-    return s if s else fallback
+    return s
 
 
 def norm_col(s: str) -> str:
@@ -48,7 +45,6 @@ def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
         nc = norm_col(cand)
         if nc in cols:
             return cols[nc]
-    # contains fallback
     for cand in candidates:
         nc = norm_col(cand)
         for c in df.columns:
@@ -77,8 +73,36 @@ def move_prochie_to_bottom(items: list[str]) -> list[str]:
     return rest + prochie
 
 
-def parse_date_any(v) -> date | None:
-    """Понимает dd.mm.yyyy, yyyy-mm-dd, datetime, excel-serial (число), и т.п."""
+def status_accent(status_text: str) -> str:
+    s = norm_col(status_text)
+    if "останов" in s or "приостанов" in s:
+        return "red"
+    if "проектир" in s:
+        return "yellow"
+    if "строитель" in s:
+        return "green"
+    return "blue"
+
+
+def works_color(work_flag: str) -> str:
+    s = norm_col(work_flag)
+    if s in ("—", "", "нет", "не ведутся", "не ведутся.", "не ведутся.."):
+        return "red"
+    if "не вед" in s or "не выполня" in s or "отсутств" in s:
+        return "red"
+    if "да" == s or "ведут" in s or "выполня" in s or "идут" in s:
+        return "green"
+    # если неясно — нейтрально
+    return "gray"
+
+
+def try_parse_date(v) -> date | None:
+    """
+    Поддерживаем:
+    - datetime/date
+    - строки: dd.mm.yyyy / yyyy-mm-dd / etc.
+    - числа Google Sheets/Excel (серийные даты)
+    """
     if v is None:
         return None
     try:
@@ -87,102 +111,95 @@ def parse_date_any(v) -> date | None:
     except Exception:
         pass
 
-    # already datetime/date
+    if isinstance(v, date) and not isinstance(v, datetime):
+        return v
     if isinstance(v, datetime):
         return v.date()
-    if isinstance(v, date):
-        return v
 
     s = str(v).strip()
-    if not s or s.lower() in ("nan", "none", "null", "#n/a", "#ref!"):
+    if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
-    # Excel serial (например 45652)
-    # Если пришло как "45652.0"
+    # Число как серийная дата (Google/Excel)
+    # В CSV часто приходит "45652" или "45652.0"
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
-            if 20000 <= num <= 80000:  # грубая защита от "не дата"
-                # Excel serial: 1899-12-30
-                dt = pd.to_datetime(num, unit="D", origin="1899-12-30", errors="coerce")
-                if pd.notna(dt):
-                    return dt.date()
+            # Excel serial date: days since 1899-12-30 (в pandas удобно так)
+            dt = pd.to_datetime(num, unit="D", origin="1899-12-30", errors="coerce")
+            if pd.isna(dt):
+                return None
+            return dt.date()
         except Exception:
-            pass
+            return None
 
-    # dd.mm.yyyy or dd/mm/yyyy
-    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%d/%m/%Y", "%d/%m/%y"):
+    # dd.mm.yyyy
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(s, fmt).date()
         except Exception:
             pass
 
-    # ISO
+    # fallback: pandas
     try:
         dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
-        if pd.notna(dt):
-            return dt.date()
+        if pd.isna(dt):
+            return None
+        return dt.date()
     except Exception:
-        pass
-
-    return None
+        return None
 
 
-def fmt_date(v) -> str:
-    d = parse_date_any(v)
-    return d.strftime("%d.%m.%Y") if d else "—"
+def update_color(updated_at_value) -> tuple[str, str]:
+    """
+    Возвращает (цвет, подпись) по светофору:
+    1–7 дней: green
+    8–14: yellow
+    >14: red
+    нет даты: gray
+    """
+    d = try_parse_date(updated_at_value)
+    if not d:
+        return "gray", "—"
+    days = (date.today() - d).days
+    if days <= 7:
+        return "green", d.strftime("%d.%m.%Y")
+    if days <= 14:
+        return "yellow", d.strftime("%d.%m.%Y")
+    return "red", d.strftime("%d.%m.%Y")
 
 
 def money_fmt(v) -> str:
     s = safe_text(v, fallback="—")
     if s == "—":
         return s
-    # убрать пробелы/запятые
-    t = str(s).replace("\u00a0", " ").replace(" ", "").replace(",", ".")
+    # попытка нормализовать число
     try:
-        x = float(t)
-        # без копеек, с пробелами
-        return f"{x:,.0f}".replace(",", " ") + " ₽"
+        x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
+        x = float(x)
+        return f"{x:,.2f}".replace(",", " ").replace(".00", "") + " ₽"
+    except Exception:
+        # если это уже текст с ₽ — просто вернём
+        return s if "₽" in s or "руб" in s.lower() else f"{s} ₽"
+
+
+def num_fmt(v) -> str:
+    s = safe_text(v, fallback="—")
+    if s == "—":
+        return s
+    try:
+        x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
+        x = float(x)
+        if x.is_integer():
+            return f"{int(x):,}".replace(",", " ")
+        return f"{x:,.2f}".replace(",", " ")
     except Exception:
         return s
 
 
-def status_class(status_text: str) -> str:
-    s = norm_col(status_text)
-    if "останов" in s or "приостанов" in s:
-        return "tag-status tag-red"
-    if "проектир" in s:
-        return "tag-status tag-yellow"
-    if "строитель" in s:
-        return "tag-status tag-green"
-    return "tag-status"
-
-
-def works_class(works_text: str) -> str:
-    s = norm_col(works_text)
-    if not s or s == "—":
-        return "tag-gray"
-    # "нет", "не ведутся", "не ведутся работы"
-    if "не вед" in s or s in ("нет", "не идут", "не осуществляется"):
-        return "tag-red"
-    if s in ("да", "ведутся", "идут", "ведется", "выполняются") or "ведут" in s or "идут" in s:
-        return "tag-green"
-    return "tag-gray"
-
-
-def updated_class(updated_value) -> tuple[str, str]:
-    """
-    Возвращает (css_class, label_text)
-    """
-    d = parse_date_any(updated_value)
-    if not d:
-        return ("tag-gray", "—")
-    days = (date.today() - d).days
-    if days <= 7:
-        return ("tag-green", d.strftime("%d.%m.%Y"))
-    if days <= 14:
-        return ("tag-yellow", d.strftime("%d.%m.%Y"))
-    return ("tag-red", d.strftime("%d.%m.%Y"))
+def date_fmt(v) -> str:
+    d = try_parse_date(v)
+    return d.strftime("%d.%m.%Y") if d else "—"
 
 
 # =============================
@@ -190,28 +207,28 @@ def updated_class(updated_value) -> tuple[str, str]:
 # =============================
 @st.cache_data(show_spinner=False)
 def load_data() -> pd.DataFrame:
-    # Priority 1: CSV_URL from secrets
     csv_url = None
     try:
         csv_url = st.secrets.get("CSV_URL", None)
     except Exception:
         csv_url = None
 
-    if not csv_url:
-        csv_url = DEFAULT_CSV_URL
+    df = pd.DataFrame()
 
-    try:
-        df = pd.read_csv(csv_url)
-    except Exception:
+    if csv_url:
         try:
-            df = pd.read_csv(csv_url, sep=";")
+            df = pd.read_csv(csv_url)
         except Exception:
-            df = pd.DataFrame()
+            try:
+                df = pd.read_csv(csv_url, sep=";")
+            except Exception:
+                df = pd.DataFrame()
 
-    # Priority 2: local XLSX in repo (if exists)
+    # fallback local
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
+            "РЕЕСТР_объектов_Курская_область_2025-2028 (17).xlsx",
             "registry.xlsx",
             "data.xlsx",
         ]
@@ -233,128 +250,171 @@ def load_data() -> pd.DataFrame:
 
 def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Сохраняем базовые поля + “паспорт/финансы/сроки”.
+    Единая схема колонок (минимум для карточки + паспортные поля):
+    id, sector, district, name, object_type, address, responsible, status,
+    work_flag, issues, updated_at, card_url, folder_url,
+    state_program, federal_project, regional_program,
+    agreement, agreement_date, agreement_amount,
+    capacity_seats, area_m2, target_deadline,
+    design, psd_cost, designer,
+    expertise, expertise_conclusion, expertise_date,
+    rns, rns_date, rns_expiry,
+    contract, contract_date, contractor, contract_price,
+    end_date_plan, end_date_fact, readiness, paid
     """
     if df.empty:
         return df
 
-    # базовые
-    col_id = pick_col(df, ["id", "ID"])
-    col_sector = pick_col(df, ["sector", "отрасль"])
-    col_district = pick_col(df, ["district", "район"])
-    col_name = pick_col(df, ["object_name", "name", "наименование", "объект"])
-    col_address = pick_col(df, ["address", "адрес"])
-    col_resp = pick_col(df, ["responsible", "ответственный"])
-    col_status = pick_col(df, ["status", "статус"])
-    col_works = pick_col(df, ["works_in_progress", "work_flag", "работы", "works"])
-    col_issues = pick_col(df, ["issues", "проблемы", "проблемные вопросы"])
-    col_updated = pick_col(df, ["updated_at", "last_update", "обновлено", "дата обновления"])
-
-    col_card = pick_col(df, ["card_url", "ссылка на карточку", "ссылка_на_карточку"])
-    col_folder = pick_col(df, ["folder_url", "ссылка на папку", "ссылка_на_папку"])
-
-    # паспорт/финансы/сроки (как у вас в EXPORT)
-    col_state_program = pick_col(df, ["state_program"])
-    col_federal_project = pick_col(df, ["federal_project"])
-    col_regional_program = pick_col(df, ["regional_program"])
-
-    col_agreement = pick_col(df, ["agreement"])
-    col_agreement_date = pick_col(df, ["agreement_date"])
-    col_agreement_amount = pick_col(df, ["agreement_amount"])
-
-    col_capacity_seats = pick_col(df, ["capacity_seats"])
-    col_area_m2 = pick_col(df, ["area_m2"])
-    col_target_deadline = pick_col(df, ["target_deadline"])
-
-    col_design = pick_col(df, ["design"])
-    col_psd_cost = pick_col(df, ["psd_cost"])
-    col_designer = pick_col(df, ["designer"])
-
-    col_expertise = pick_col(df, ["expertise"])
-    col_expertise_conclusion = pick_col(df, ["expertise_conclusion"])
-    col_expertise_date = pick_col(df, ["expertise_date"])
-
-    col_rns = pick_col(df, ["rns"])
-    col_rns_date = pick_col(df, ["rns_date"])
-    col_rns_expiry = pick_col(df, ["rns_expiry"])
-
-    col_contract = pick_col(df, ["contract"])
-    col_contract_date = pick_col(df, ["contract_date"])
-    col_contractor = pick_col(df, ["contractor"])
-    col_contract_price = pick_col(df, ["contract_price"])
-
-    col_end_plan = pick_col(df, ["end_date_plan"])
-    col_end_fact = pick_col(df, ["end_date_fact"])
-    col_readiness = pick_col(df, ["readiness"])
-    col_paid = pick_col(df, ["paid"])
+    def col(*cands):
+        return pick_col(df, list(cands))
 
     out = pd.DataFrame()
 
-    def get(c):
-        return df[c] if c else ""
+    out["id"] = df[col("id", "ID")] if col("id", "ID") else ""
 
-    out["id"] = get(col_id)
-    out["sector"] = get(col_sector)
-    out["district"] = get(col_district)
-    out["name"] = get(col_name)
-    out["address"] = get(col_address)
-    out["responsible"] = get(col_resp)
-    out["status"] = get(col_status)
-    out["works_in_progress"] = get(col_works)
-    out["issues"] = get(col_issues)
-    out["updated_at"] = get(col_updated)
-    out["card_url"] = get(col_card)
-    out["folder_url"] = get(col_folder)
+    out["sector"] = df[col("sector", "отрасль")] if col("sector", "отрасль") else ""
+    out["district"] = df[col("district", "район")] if col("district", "район") else ""
+    out["name"] = df[col("name", "object_name", "наименование_объекта", "наименование объекта", "объект")] if col(
+        "name", "object_name", "наименование_объекта", "наименование объекта", "объект"
+    ) else ""
+    out["object_type"] = df[col("object_type", "тип", "вид объекта")] if col("object_type", "тип", "вид объекта") else ""
+    out["address"] = df[col("address", "адрес")] if col("address", "адрес") else ""
+    out["responsible"] = df[col("responsible", "ответственный")] if col("responsible", "ответственный") else ""
+    out["status"] = df[col("status", "статус")] if col("status", "статус") else ""
+    out["work_flag"] = df[col("work_flag", "работы", "works_in_progress", "works")] if col(
+        "work_flag", "работы", "works_in_progress", "works"
+    ) else ""
+    out["issues"] = df[col("issues", "проблемы", "проблемные вопросы")] if col(
+        "issues", "проблемы", "проблемные вопросы"
+    ) else ""
+    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
+        "updated_at", "last_update", "обновлено", "updated"
+    ) else ""
 
-    out["state_program"] = get(col_state_program)
-    out["federal_project"] = get(col_federal_project)
-    out["regional_program"] = get(col_regional_program)
+    out["card_url"] = df[col("card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")] if col(
+        "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку"
+    ) else ""
+    out["folder_url"] = df[col("folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку")] if col(
+        "folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку"
+    ) else ""
 
-    out["agreement"] = get(col_agreement)
-    out["agreement_date"] = get(col_agreement_date)
-    out["agreement_amount"] = get(col_agreement_amount)
+    # Паспортные поля
+    out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
+        "state_program", "гп", "государственная программа"
+    ) else ""
+    out["federal_project"] = df[col("federal_project", "фп", "федеральный проект")] if col(
+        "federal_project", "фп", "федеральный проект"
+    ) else ""
+    out["regional_program"] = df[col("regional_program", "рп", "региональная программа")] if col(
+        "regional_program", "рп", "региональная программа"
+    ) else ""
 
-    out["capacity_seats"] = get(col_capacity_seats)
-    out["area_m2"] = get(col_area_m2)
-    out["target_deadline"] = get(col_target_deadline)
+    out["agreement"] = df[col("agreement", "соглашение", "номер соглашения")] if col(
+        "agreement", "соглашение", "номер соглашения"
+    ) else ""
+    out["agreement_date"] = df[col("agreement_date", "дата соглашения")] if col(
+        "agreement_date", "дата соглашения"
+    ) else ""
+    out["agreement_amount"] = df[col("agreement_amount", "сумма соглашения")] if col(
+        "agreement_amount", "сумма соглашения"
+    ) else ""
 
-    out["design"] = get(col_design)
-    out["psd_cost"] = get(col_psd_cost)
-    out["designer"] = get(col_designer)
+    out["capacity_seats"] = df[col("capacity_seats", "мощность", "мест", "посещений")] if col(
+        "capacity_seats", "мощность", "мест", "посещений"
+    ) else ""
+    out["area_m2"] = df[col("area_m2", "площадь", "м2", "кв.м")] if col(
+        "area_m2", "площадь", "м2", "кв.м"
+    ) else ""
+    out["target_deadline"] = df[col("target_deadline", "целевой срок")] if col(
+        "target_deadline", "целевой срок"
+    ) else ""
 
-    out["expertise"] = get(col_expertise)
-    out["expertise_conclusion"] = get(col_expertise_conclusion)
-    out["expertise_date"] = get(col_expertise_date)
+    out["design"] = df[col("design", "проектирование", "псд")] if col("design", "проектирование", "псд") else ""
+    out["psd_cost"] = df[col("psd_cost", "стоимость псд")] if col("psd_cost", "стоимость псд") else ""
+    out["designer"] = df[col("designer", "проектировщик")] if col("designer", "проектировщик") else ""
 
-    out["rns"] = get(col_rns)
-    out["rns_date"] = get(col_rns_date)
-    out["rns_expiry"] = get(col_rns_expiry)
+    out["expertise"] = df[col("expertise", "экспертиза")] if col("expertise", "экспертиза") else ""
+    out["expertise_conclusion"] = df[col("expertise_conclusion", "заключение экспертизы")] if col(
+        "expertise_conclusion", "заключение экспертизы"
+    ) else ""
+    out["expertise_date"] = df[col("expertise_date", "дата экспертизы")] if col(
+        "expertise_date", "дата экспертизы"
+    ) else ""
 
-    out["contract"] = get(col_contract)
-    out["contract_date"] = get(col_contract_date)
-    out["contractor"] = get(col_contractor)
-    out["contract_price"] = get(col_contract_price)
+    out["rns"] = df[col("rns", "рнс")] if col("rns", "рнс") else ""
+    out["rns_date"] = df[col("rns_date", "дата рнс")] if col("rns_date", "дата рнс") else ""
+    out["rns_expiry"] = df[col("rns_expiry", "срок действия рнс")] if col("rns_expiry", "срок действия рнс") else ""
 
-    out["end_date_plan"] = get(col_end_plan)
-    out["end_date_fact"] = get(col_end_fact)
-    out["readiness"] = get(col_readiness)
-    out["paid"] = get(col_paid)
+    out["contract"] = df[col("contract", "контракт", "номер контракта")] if col(
+        "contract", "контракт", "номер контракта"
+    ) else ""
+    out["contract_date"] = df[col("contract_date", "дата контракта")] if col(
+        "contract_date", "дата контракта"
+    ) else ""
+    out["contractor"] = df[col("contractor", "подрядчик")] if col("contractor", "подрядчик") else ""
+    out["contract_price"] = df[col("contract_price", "цена контракта", "стоимость контракта")] if col(
+        "contract_price", "цена контракта", "стоимость контракта"
+    ) else ""
 
-    # normalize basic
+    out["end_date_plan"] = df[col("end_date_plan", "окончание план")] if col(
+        "end_date_plan", "окончание план"
+    ) else ""
+    out["end_date_fact"] = df[col("end_date_fact", "окончание факт")] if col(
+        "end_date_fact", "окончание факт"
+    ) else ""
+    out["readiness"] = df[col("readiness", "готовность")] if col("readiness", "готовность") else ""
+    out["paid"] = df[col("paid", "оплачено")] if col("paid", "оплачено") else ""
+
+    # чистка
     for c in out.columns:
-        out[c] = out[c].astype(str).replace({"nan": "", "None": "", "NaT": ""})
+        out[c] = out[c].astype(str).replace({"nan": "", "None": "", "null": ""})
 
     return out
 
 
 # =============================
-# STYLES
+# THEME-AWARE STYLES (Light/Dark)
 # =============================
 crest_b64 = read_local_crest_b64()
 
 st.markdown(
     """
 <style>
+/* --------- Theme tokens (default light) --------- */
+:root{
+  --bg: #f7f8fb;
+  --card: #ffffff;
+  --card2: rgba(15,23,42,.03);
+  --text: #0f172a;
+  --muted: rgba(15,23,42,.72);
+  --border: rgba(15,23,42,.10);
+  --shadow: rgba(0,0,0,.06);
+  --chip-bg: rgba(15,23,42,.05);
+  --chip-bd: rgba(15,23,42,.10);
+  --btn-bg: rgba(255,255,255,.95);
+  --btn-bd: rgba(15,23,42,.12);
+  --hr: rgba(15,23,42,.12);
+}
+
+/* Prefer system dark */
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg: #0b1220;
+    --card: #111a2b;
+    --card2: rgba(255,255,255,.04);
+    --text: rgba(255,255,255,.92);
+    --muted: rgba(255,255,255,.70);
+    --border: rgba(255,255,255,.12);
+    --shadow: rgba(0,0,0,.35);
+    --chip-bg: rgba(255,255,255,.06);
+    --chip-bd: rgba(255,255,255,.12);
+    --btn-bg: rgba(17,26,43,.90);
+    --btn-bd: rgba(255,255,255,.14);
+    --hr: rgba(255,255,255,.14);
+  }
+}
+
+/* Streamlit containers */
 .block-container { padding-top: 24px !important; max-width: 1200px; }
 @media (max-width: 1200px){ .block-container { max-width: 96vw; } }
 div[data-testid="stHorizontalBlock"]{ gap: 14px; }
@@ -363,7 +423,11 @@ div[data-testid="stHorizontalBlock"]{ gap: 14px; }
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-/* --- HERO --- */
+html, body, [data-testid="stAppViewContainer"]{
+  background: var(--bg) !important;
+}
+
+/* --------- HERO (как было, но читабельно в dark тоже) --------- */
 .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 14px; }
 .hero{
   width: 100%;
@@ -384,55 +448,78 @@ header {visibility: hidden;}
   transform: rotate(14deg);
   border-radius: 32px;
 }
-.hero-row{ display:flex; align-items:flex-start; gap: 16px; position: relative; z-index: 2; }
+.hero-row{
+  display:flex;
+  align-items:flex-start;
+  gap: 16px;
+  position: relative;
+  z-index: 2;
+}
 .hero-crest{
-  width: 74px; height: 74px; border-radius: 14px;
+  width: 74px; height: 74px;
+  border-radius: 14px;
   background: rgba(255,255,255,.10);
-  display:flex; align-items:center; justify-content:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   border: 1px solid rgba(255,255,255,.16);
   flex: 0 0 auto;
 }
-.hero-crest img{ width: 56px; height: 56px; object-fit: contain; filter: drop-shadow(0 6px 10px rgba(0,0,0,.35)); }
-.hero-ministry{ color: rgba(255,255,255,.95); font-weight: 900; font-size: 20px; line-height: 1.15; }
-.hero-app{ margin-top: 6px; color: rgba(255,255,255,.92); font-weight: 800; font-size: 16px; }
-.hero-sub{ margin-top: 6px; color: rgba(255,255,255,.78); font-size: 13px; }
-@media (max-width: 900px){ .hero-ministry{ font-size: 16px; } .hero-row{ align-items:center; } }
+.hero-crest img{
+  width: 56px; height: 56px; object-fit: contain;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+}
+.hero-titles{ flex: 1 1 auto; min-width: 0; }
+.hero-ministry{
+  color: rgba(255,255,255,.95);
+  font-weight: 900;
+  font-size: 20px;
+  line-height: 1.15;
+}
+.hero-app{
+  margin-top: 6px;
+  color: rgba(255,255,255,.92);
+  font-weight: 800;
+  font-size: 16px;
+}
+.hero-sub{
+  margin-top: 6px;
+  color: rgba(255,255,255,.78);
+  font-size: 13px;
+}
+@media (max-width: 900px){
+  .hero-ministry{ font-size: 16px; }
+  .hero-row{ align-items:center; }
+}
 
-/* ===== Cards ===== */
+/* --------- CARD (компактная шапка + expander) --------- */
 .card{
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, .10);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 16px 16px 12px 16px;
-  box-shadow: 0 10px 22px rgba(0,0,0,.06);
+  padding: 16px;
+  box-shadow: 0 10px 22px var(--shadow);
   margin-bottom: 14px;
   position: relative;
-  overflow: hidden;
 }
-.card:before{
-  content:"";
-  position:absolute;
-  left:0; top:0; bottom:0;
-  width: 6px;
-  background: rgba(59,130,246,.25);
-}
-.card[data-accent="green"]:before{ background: rgba(34,197,94,.30); }
-.card[data-accent="yellow"]:before{ background: rgba(245,158,11,.28); }
-.card[data-accent="red"]:before{ background: rgba(239,68,68,.28); }
+.card[data-accent="green"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(34,197,94,.55); }
+.card[data-accent="yellow"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(245,158,11,.55); }
+.card[data-accent="red"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(239,68,68,.55); }
+.card[data-accent="blue"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(59,130,246,.45); }
 
 .card-title{
   font-size: 20px;
-  line-height: 1.20;
+  line-height: 1.15;
   font-weight: 900;
-  margin: 2px 0 8px 0;
-  color: #0f172a;
-  letter-spacing: -0.2px;
+  margin: 0 0 10px 0;
+  color: var(--text);
 }
 .card-subchips{
   display:flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin: 0 0 10px 0;
+  margin-top: -2px;
+  margin-bottom: 10px;
 }
 .chip{
   display:inline-flex;
@@ -440,31 +527,30 @@ header {visibility: hidden;}
   gap: 8px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, .10);
-  background: rgba(15, 23, 42, .03);
+  border: 1px solid var(--chip-bd);
+  background: var(--chip-bg);
   font-size: 13px;
-  color: rgba(15, 23, 42, .90);
-}
-.chip-id{
-  background: rgba(37,99,235,.10);
-  border-color: rgba(37,99,235,.18);
-  font-weight: 800;
+  color: var(--text);
+  opacity: .95;
 }
 
 .card-grid{
-  display: grid;
+  display:grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px 18px;
-  margin-top: 4px;
+  margin-top: 6px;
 }
-.card-item{ font-size: 14px; color: rgba(15, 23, 42, .92); }
-.card-item b{ color: rgba(15, 23, 42, .95); }
+.card-item{
+  font-size: 14px;
+  color: var(--text);
+}
+.card-item b{ color: var(--text); }
 
 .card-tags{
   display:flex;
   gap: 10px;
   flex-wrap: wrap;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 .tag{
   display:inline-flex;
@@ -472,16 +558,16 @@ header {visibility: hidden;}
   gap: 8px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, .10);
-  background: rgba(15, 23, 42, .03);
+  border: 1px solid var(--chip-bd);
+  background: var(--chip-bg);
   font-size: 13px;
-  color: rgba(15, 23, 42, .90);
+  color: var(--text);
+  font-weight: 800;
 }
-.tag-status{ font-weight: 900; }
-.tag-green{ background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.22); }
-.tag-yellow{ background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.25); }
-.tag-red{ background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.22); }
-.tag-gray{ background: rgba(15,23,42,.04); border-color: rgba(15,23,42,.10); }
+.tag-gray{ opacity: .92; }
+.tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
+.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
+.tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
 .card-actions{
   display:flex;
@@ -496,60 +582,65 @@ header {visibility: hidden;}
   gap: 8px;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(15, 23, 42, .12);
-  background: rgba(255,255,255,.95);
+  border: 1px solid var(--btn-bd);
+  background: var(--btn-bg);
   text-decoration:none !important;
-  color: rgba(15, 23, 42, .92) !important;
+  color: var(--text) !important;
   font-weight: 800;
   font-size: 14px;
   transition: .12s ease-in-out;
 }
-.a-btn:hover{ transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,.08); }
-.a-btn.disabled{ opacity: .45; pointer-events: none; }
-
-/* Expander styling */
-div[data-testid="stExpander"] details{
-  border-radius: 14px !important;
-  border: 1px solid rgba(15, 23, 42, .10) !important;
-  background: rgba(15, 23, 42, .02) !important;
+.a-btn:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(0,0,0,.10);
 }
-div[data-testid="stExpander"] summary{
-  font-weight: 900 !important;
-  font-size: 14px !important;
-}
-div[data-testid="stExpander"] summary:hover{
-  background: rgba(37,99,235,.06) !important;
+.a-btn.disabled{
+  opacity: .45;
+  pointer-events:none;
 }
 
-/* Details grid */
-.detail-grid{
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 18px;
-  margin-top: 8px;
+.hr-soft{
+  margin-top: 12px;
+  border-top: 1px dashed var(--hr);
+  opacity: .9;
 }
-.detail-row{
-  font-size: 13px;
-  color: rgba(15,23,42,.85);
-  line-height: 1.35;
-}
-.detail-row b{ color: rgba(15,23,42,.95); }
-.hr-soft{ height:1px; background: rgba(15,23,42,.08); margin: 10px 0; }
 
-.warn-box{
-  background: rgba(239,68,68,.06);
-  border: 1px solid rgba(239,68,68,.18);
-  border-radius: 12px;
+.section{
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+}
+.section-title{
+  font-weight: 900;
+  color: var(--text);
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.row{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text);
+  font-size: 13.5px;
+}
+.row b{ color: var(--text); }
+.row .muted{ color: var(--muted); }
+
+.issue-box{
+  border: 1px solid rgba(239,68,68,.25);
+  background: rgba(239,68,68,.08);
+  color: var(--text);
   padding: 10px 12px;
-  font-size: 13px;
-  color: rgba(15,23,42,.92);
+  border-radius: 12px;
+  font-size: 13.5px;
 }
 
-/* Mobile */
 @media (max-width: 900px){
   .card-grid{ grid-template-columns: 1fr; }
-  .detail-grid{ grid-template-columns: 1fr; }
   .card-title{ font-size: 18px; }
+  .card-actions{ flex-direction: column; }
 }
 </style>
 """,
@@ -575,7 +666,7 @@ st.markdown(
       <div class="hero-titles">
         <div class="hero-ministry">Министерство восстановления, развития приграничья и строительства Курской области</div>
         <div class="hero-app">Реестр объектов</div>
-        <div class="hero-sub">Единый список объектов 2025–2028 с фильтрами и переходом в карточку/папку.</div>
+        <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку.</div>
       </div>
     </div>
   </div>
@@ -604,6 +695,7 @@ if APP_PASSWORD:
     if not st.session_state.auth_ok:
         st.markdown("### 🔐 Доступ к реестру")
         st.write("Введите пароль для просмотра данных.")
+
         with st.form("login_form", clear_on_submit=False):
             pwd = st.text_input("Пароль", type="password")
             submitted = st.form_submit_button("Войти")
@@ -623,12 +715,15 @@ if APP_PASSWORD:
 # =============================
 raw = load_data()
 if raw.empty:
-    st.error("Данные не загрузились. Проверьте CSV_URL (Secrets) или публикацию CSV из Google Sheets.")
+    st.error(
+        "Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets "
+        "или наличие .xlsx в репозитории."
+    )
     st.stop()
 
 df = normalize_schema(raw)
 
-# filters lists
+# unique lists
 sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
 districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()])
 statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
@@ -651,7 +746,7 @@ with c2:
 with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 
-q = st.text_input("🔎 Поиск (наименование / адрес / ответственный / id)", value="", key="f_search").strip().lower()
+q = st.text_input("🔎 Поиск (наименование / адрес / ответственный)", value="", key="f_search").strip().lower()
 
 filtered = df.copy()
 
@@ -665,7 +760,13 @@ if status_sel != "Все":
 if q:
 
     def row_match(r):
-        s = " ".join([str(r.get("name", "")), str(r.get("address", "")), str(r.get("responsible", "")), str(r.get("id", ""))]).lower()
+        s = " ".join(
+            [
+                str(r.get("name", "")),
+                str(r.get("address", "")),
+                str(r.get("responsible", "")),
+            ]
+        ).lower()
         return q in s
 
     filtered = filtered[filtered.apply(row_match, axis=1)]
@@ -677,38 +778,55 @@ st.divider()
 # =============================
 # CARD RENDER
 # =============================
+def render_kv(label: str, value: str):
+    st.markdown(f'<div class="row"><b>{label}:</b> {value}</div>', unsafe_allow_html=True)
+
+
 def render_card(row: pd.Series):
     title = safe_text(row.get("name", ""), fallback="Объект")
     sector = safe_text(row.get("sector", ""), fallback="—")
     district = safe_text(row.get("district", ""), fallback="—")
     address = safe_text(row.get("address", ""), fallback="—")
     responsible = safe_text(row.get("responsible", ""), fallback="—")
-    obj_id = safe_text(row.get("id", ""), fallback="—")
 
     status = safe_text(row.get("status", ""), fallback="—")
-    works = safe_text(row.get("works_in_progress", ""), fallback="—")
+    work_flag = safe_text(row.get("work_flag", ""), fallback="—")
     issues = safe_text(row.get("issues", ""), fallback="—")
-    updated_raw = row.get("updated_at", "")
 
     card_url = safe_text(row.get("card_url", ""), fallback="")
     folder_url = safe_text(row.get("folder_url", ""), fallback="")
 
-    # updated traffic light
-    upd_cls, upd_txt = updated_class(updated_raw)
+    # Цвета
+    accent = status_accent(status)
+    w_col = works_color(work_flag)
+    u_col, u_txt = update_color(row.get("updated_at", ""))
 
-    # works traffic light
-    w_cls = works_class(works)
+    # теги
+    s_col = "tag-gray"
+    if accent == "green":
+        s_col = "tag-green"
+    elif accent == "yellow":
+        s_col = "tag-yellow"
+    elif accent == "red":
+        s_col = "tag-red"
 
-    # status accent for left stripe
-    scls = status_class(status)
-    accent = "blue"
-    if "tag-red" in scls:
-        accent = "red"
-    elif "tag-yellow" in scls:
-        accent = "yellow"
-    elif "tag-green" in scls:
-        accent = "green"
+    w_tag = "tag-gray"
+    if w_col == "green":
+        w_tag = "tag-green"
+    elif w_col == "yellow":
+        w_tag = "tag-yellow"
+    elif w_col == "red":
+        w_tag = "tag-red"
 
+    u_tag = "tag-gray"
+    if u_col == "green":
+        u_tag = "tag-green"
+    elif u_col == "yellow":
+        u_tag = "tag-yellow"
+    elif u_col == "red":
+        u_tag = "tag-red"
+
+    # кнопки
     btn_card = (
         f'<a class="a-btn" href="{card_url}" target="_blank">📄 Открыть карточку</a>'
         if card_url and card_url != "—"
@@ -720,14 +838,13 @@ def render_card(row: pd.Series):
         else '<span class="a-btn disabled">📁 Открыть папку</span>'
     )
 
-    # HEADER (короткая часть)
+    # ШАПКА карточки (компактно)
     st.markdown(
         f"""
 <div class="card" data-accent="{accent}">
   <div class="card-title">{title}</div>
 
   <div class="card-subchips">
-    <span class="chip chip-id">🆔 {obj_id}</span>
     <span class="chip">🏷️ {sector}</span>
     <span class="chip">📍 {district}</span>
   </div>
@@ -738,9 +855,9 @@ def render_card(row: pd.Series):
   </div>
 
   <div class="card-tags">
-    <span class="tag {scls}">📌 <b>Статус:</b> {status}</span>
-    <span class="tag {w_cls}">🛠️ <b>Работы:</b> {works}</span>
-    <span class="tag {upd_cls}">⏱️ <b>Обновлено:</b> {upd_txt}</span>
+    <span class="tag {s_col}">📌 Статус: {status}</span>
+    <span class="tag {w_tag}">🛠️ Работы: {work_flag}</span>
+    <span class="tag {u_tag}">⏱️ Обновлено: {u_txt}</span>
   </div>
 
   <div class="card-actions">
@@ -752,130 +869,76 @@ def render_card(row: pd.Series):
         unsafe_allow_html=True,
     )
 
-    # DETAILS (в expander)
-    with st.expander("📎 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть", expanded=False):
-        # Проблемы
+    # РАСКРЫВАЕМЫЙ ПАСПОРТ (чтобы не было громоздко)
+    exp_label = "📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть"
+    with st.expander(exp_label, expanded=False):
+        # Проблемные вопросы
+        st.markdown('<div class="section"><div class="section-title">⚠️ Проблемные вопросы</div>', unsafe_allow_html=True)
         if issues != "—":
-            st.markdown(
-                f"""
-<div class="warn-box">
-  ⚠️ <b>Проблемные вопросы:</b><br/>
-  {issues}
-</div>
-""",
-                unsafe_allow_html=True,
-            )
+            st.markdown(f'<div class="issue-box">{issues}</div>', unsafe_allow_html=True)
         else:
-            st.caption("Проблемные вопросы: —")
-
-        st.markdown('<div class="hr-soft"></div>', unsafe_allow_html=True)
-
-        # Разделы в 2 колонки
-        def two_col_section(title_txt: str, left_rows: list[tuple[str, str]], right_rows: list[tuple[str, str]]):
-            left_html = "".join([f'<div class="detail-row"><b>{k}</b> {v}</div>' for k, v in left_rows if v != "—"])
-            right_html = "".join([f'<div class="detail-row"><b>{k}</b> {v}</div>' for k, v in right_rows if v != "—"])
-            if not left_html and not right_html:
-                return
-            st.markdown(
-                f"""
-<div class="detail-row" style="font-weight:900; font-size:14px; margin-bottom:6px;">{title_txt}</div>
-<div class="detail-grid">
-  <div>{left_html if left_html else '<div class="detail-row">—</div>'}</div>
-  <div>{right_html if right_html else '<div class="detail-row">—</div>'}</div>
-</div>
-<div class="hr-soft"></div>
-""",
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="row"><span class="muted">—</span></div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # Программы
-        two_col_section(
-            "🏛️ Программы",
-            [
-                ("ГП/СП:", safe_text(row.get("state_program"))),
-                ("РП:", safe_text(row.get("regional_program"))),
-            ],
-            [
-                ("ФП:", safe_text(row.get("federal_project"))),
-            ],
-        )
+        st.markdown('<div class="section"><div class="section-title">🏛️ Программы</div>', unsafe_allow_html=True)
+        render_kv("ГП/СП", safe_text(row.get("state_program", ""), "—"))
+        render_kv("ФП", safe_text(row.get("federal_project", ""), "—"))
+        render_kv("РП", safe_text(row.get("regional_program", ""), "—"))
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # Соглашение
-        two_col_section(
-            "🧾 Соглашение",
-            [
-                ("№:", safe_text(row.get("agreement"))),
-                ("Сумма:", money_fmt(row.get("agreement_amount"))),
-            ],
-            [
-                ("Дата:", fmt_date(row.get("agreement_date"))),
-            ],
-        )
+        st.markdown('<div class="section"><div class="section-title">🧾 Соглашение</div>', unsafe_allow_html=True)
+        render_kv("№", safe_text(row.get("agreement", ""), "—"))
+        render_kv("Дата", date_fmt(row.get("agreement_date", "")))
+        render_kv("Сумма", money_fmt(row.get("agreement_amount", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # Параметры
-        two_col_section(
-            "📦 Параметры",
-            [
-                ("Мощность:", safe_text(row.get("capacity_seats"))),
-                ("Целевой срок:", fmt_date(row.get("target_deadline"))),
-            ],
-            [
-                ("Площадь:", safe_text(row.get("area_m2"))),
-            ],
-        )
+        st.markdown('<div class="section"><div class="section-title">📦 Параметры</div>', unsafe_allow_html=True)
+        cap = safe_text(row.get("capacity_seats", ""), "—")
+        area = safe_text(row.get("area_m2", ""), "—")
+        if cap != "—":
+            cap = f"{cap}"
+        if area != "—":
+            area = f"{area}"
+        render_kv("Мощность", cap)
+        render_kv("Площадь", area)
+        render_kv("Целевой срок", date_fmt(row.get("target_deadline", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # ПСД / Экспертиза
-        two_col_section(
-            "📑 ПСД / Экспертиза",
-            [
-                ("Стоимость ПСД:", money_fmt(row.get("psd_cost"))),
-                ("Экспертиза:", safe_text(row.get("expertise"))),
-                ("Заключение:", safe_text(row.get("expertise_conclusion"))),
-            ],
-            [
-                ("Проектировщик:", safe_text(row.get("designer"))),
-                ("Дата экспертизы:", fmt_date(row.get("expertise_date"))),
-                ("Проектирование:", safe_text(row.get("design"))),
-            ],
-        )
+        st.markdown('<div class="section"><div class="section-title">🗂️ ПСД / Экспертиза</div>', unsafe_allow_html=True)
+        render_kv("ПСД", safe_text(row.get("design", ""), "—"))
+        render_kv("Стоимость ПСД", money_fmt(row.get("psd_cost", "")))
+        render_kv("Проектировщик", safe_text(row.get("designer", ""), "—"))
+        render_kv("Экспертиза", safe_text(row.get("expertise", ""), "—"))
+        render_kv("Дата экспертизы", date_fmt(row.get("expertise_date", "")))
+        render_kv("Заключение", safe_text(row.get("expertise_conclusion", ""), "—"))
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # РНС
-        two_col_section(
-            "🏗️ РНС",
-            [
-                ("№ РНС:", safe_text(row.get("rns"))),
-                ("Срок действия:", fmt_date(row.get("rns_expiry"))),
-            ],
-            [
-                ("Дата:", fmt_date(row.get("rns_date"))),
-            ],
-        )
+        st.markdown('<div class="section"><div class="section-title">🏗️ РНС</div>', unsafe_allow_html=True)
+        render_kv("№ РНС", safe_text(row.get("rns", ""), "—"))
+        render_kv("Дата", date_fmt(row.get("rns_date", "")))
+        render_kv("Срок действия", date_fmt(row.get("rns_expiry", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # Контракт
-        two_col_section(
-            "🧱 Контракт",
-            [
-                ("№:", safe_text(row.get("contract"))),
-                ("Подрядчик:", safe_text(row.get("contractor"))),
-            ],
-            [
-                ("Дата:", fmt_date(row.get("contract_date"))),
-                ("Цена:", money_fmt(row.get("contract_price"))),
-            ],
-        )
+        st.markdown('<div class="section"><div class="section-title">🧩 Контракт</div>', unsafe_allow_html=True)
+        render_kv("№", safe_text(row.get("contract", ""), "—"))
+        render_kv("Дата", date_fmt(row.get("contract_date", "")))
+        render_kv("Подрядчик", safe_text(row.get("contractor", ""), "—"))
+        render_kv("Цена", money_fmt(row.get("contract_price", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        # Сроки / Финансы
-        two_col_section(
-            "⏳ Сроки / Финансы",
-            [
-                ("Окончание (план):", fmt_date(row.get("end_date_plan"))),
-                ("Готовность:", safe_text(row.get("readiness"))),
-            ],
-            [
-                ("Окончание (факт):", fmt_date(row.get("end_date_fact"))),
-                ("Оплачено:", money_fmt(row.get("paid"))),
-            ],
-        )
+        # Сроки/финансы
+        st.markdown('<div class="section"><div class="section-title">⏳ Сроки / финансы</div>', unsafe_allow_html=True)
+        render_kv("Окончание (план)", date_fmt(row.get("end_date_plan", "")))
+        render_kv("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))
+        render_kv("Готовность", safe_text(row.get("readiness", ""), "—"))
+        render_kv("Оплачено", money_fmt(row.get("paid", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =============================
