@@ -113,7 +113,7 @@ def try_parse_date(v) -> date | None:
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
-    # Excel serial date (например 45234)
+    # Excel serial date
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
@@ -124,14 +124,12 @@ def try_parse_date(v) -> date | None:
         except Exception:
             return None
 
-    # популярные форматы
     for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(s, fmt).date()
         except Exception:
             pass
 
-    # общий парсер
     try:
         dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
         if pd.isna(dt):
@@ -171,12 +169,6 @@ def date_fmt(v) -> str:
 
 
 def percent_fmt(v) -> str:
-    """
-    Готовность:
-    - 0.38 -> 38%
-    - 38 -> 38%
-    - '38%' -> 38%
-    """
     s = safe_text(v, fallback="—")
     if s == "—":
         return "—"
@@ -254,11 +246,10 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         return pick_col(df, list(cands))
 
     out = pd.DataFrame()
-
     out["sector"] = df[col("sector", "отрасль")] if col("sector", "отрасль") else ""
     out["district"] = df[col("district", "район")] if col("district", "район") else ""
-    out["name"] = df[col("name", "object_name", "наименование_объекта", "наименование объекта", "объект")] if col(
-        "name", "object_name", "наименование_объекта", "наименование объекта", "объект"
+    out["name"] = df[col("name", "object_name", "наименование объекта", "наименование_объекта", "объект")] if col(
+        "name", "object_name", "наименование объекта", "наименование_объекта", "объект"
     ) else ""
     out["address"] = df[col("address", "адрес")] if col("address", "адрес") else ""
     out["responsible"] = df[col("responsible", "ответственный")] if col("responsible", "ответственный") else ""
@@ -272,14 +263,13 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
         "updated_at", "last_update", "обновлено", "updated"
     ) else ""
-    out["card_url"] = df[col("card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")] if col(
-        "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку"
+    out["card_url"] = df[col("card_url", "ссылка на карточку", "ссылка_на_карточку")] if col(
+        "card_url", "ссылка на карточку", "ссылка_на_карточку"
     ) else ""
-    out["folder_url"] = df[col("folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку")] if col(
-        "folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку"
+    out["folder_url"] = df[col("folder_url", "ссылка на папку", "ссылка_на_папку")] if col(
+        "folder_url", "ссылка на папку", "ссылка_на_папку"
     ) else ""
 
-    # дополнительные поля (как в вашем реестре)
     fields = [
         "state_program", "federal_project", "regional_program",
         "agreement", "agreement_date", "agreement_amount",
@@ -321,6 +311,9 @@ st.markdown(
   --chip-bd: rgba(15,23,42,.10);
   --btn-bg: rgba(255,255,255,.95);
   --btn-bd: rgba(15,23,42,.12);
+
+  --title-bg: rgba(59,130,246,.06);
+  --title-bd: rgba(59,130,246,.25);
 }
 
 @media (prefers-color-scheme: dark){
@@ -336,6 +329,9 @@ st.markdown(
     --chip-bd: rgba(255,255,255,.12);
     --btn-bg: rgba(17,26,43,.92);
     --btn-bd: rgba(255,255,255,.14);
+
+    --title-bg: rgba(147,197,253,.10);
+    --title-bd: rgba(147,197,253,.30);
   }
 }
 
@@ -435,30 +431,37 @@ header {visibility: hidden;}
   align-items:flex-start;
   justify-content:space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+/* НОВЫЙ ЗАГОЛОВОК: плашка с рамкой */
+.title-box{
+  flex: 1 1 auto;
+  border: 1px solid var(--title-bd);
+  background: var(--title-bg);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+.title-row{
+  display:flex;
+  align-items:flex-start;
+  gap: 10px;
 }
 .card-title{
-  font-size: 20px;
-  line-height: 1.15;
+  font-size: 18px;
+  line-height: 1.25;
   font-weight: 950;
   margin: 0;
   color: var(--text);
-  letter-spacing: .2px;
+  letter-spacing: .15px;
 }
-.card-title span{
-  background: linear-gradient(90deg, rgba(59,130,246,.22), rgba(34,197,94,.16), rgba(245,158,11,.12));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.title-link{
+  margin-top: 2px;
+  font-size: 16px;
+  text-decoration: none !important;
+  opacity: .85;
 }
-@media (prefers-color-scheme: dark){
-  .card-title span{
-    background: linear-gradient(90deg, rgba(147,197,253,.45), rgba(134,239,172,.28), rgba(253,230,138,.25));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-}
+.title-link:hover{ opacity: 1; }
 
 .photo{
   width: 132px;
@@ -604,7 +607,6 @@ if APP_PASSWORD:
     if not st.session_state.auth_ok:
         st.markdown("### 🔐 Доступ к реестру")
         st.write("Введите пароль для просмотра данных.")
-
         with st.form("login_form", clear_on_submit=False):
             pwd = st.text_input("Пароль", type="password")
             submitted = st.form_submit_button("Войти")
@@ -624,7 +626,7 @@ if APP_PASSWORD:
 # =============================
 raw = load_data()
 if raw.empty:
-    st.error("Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets или наличие .xlsx в репозитории.")
+    st.error("Данные не загрузились. Проверьте CSV_URL в Secrets или наличие .xlsx в репозитории.")
     st.stop()
 
 df = normalize_schema(raw)
@@ -721,12 +723,19 @@ def render_card(row: pd.Series):
 
     photo_html = f'<div class="photo"><img src="{photo_url}" alt="Фото объекта"/></div>' if photo_url and photo_url != "—" else ""
 
-    # ШАПКА карточки
+    # ссылка-иконка у заголовка (если есть card_url)
+    link_icon = f'<a class="title-link" href="{card_url}" target="_blank" title="Открыть карточку">🔗</a>' if card_url and card_url != "—" else ""
+
     st.markdown(
         f"""
 <div class="card" data-accent="{accent}">
   <div class="title-bar">
-    <h3 class="card-title"><span>{title}</span></h3>
+    <div class="title-box">
+      <div class="title-row">
+        <h3 class="card-title">{title}</h3>
+        {link_icon}
+      </div>
+    </div>
     {photo_html}
   </div>
 
@@ -755,7 +764,6 @@ def render_card(row: pd.Series):
         unsafe_allow_html=True,
     )
 
-    # СВОРАЧИВАЕМЫЙ “ПАСПОРТ”
     with st.expander("📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть", expanded=False):
         st.markdown('<div class="section"><div class="section-title">⚠️ Проблемные вопросы</div>', unsafe_allow_html=True)
         if issues != "—":
