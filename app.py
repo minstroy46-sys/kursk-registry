@@ -91,7 +91,6 @@ def parse_date_any(v) -> date | None:
     if not s or s.lower() in ("—", "nan", "none", "null"):
         return None
 
-    # dd.mm.yyyy
     m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", s)
     if m:
         dd, mm, yy = map(int, m.groups())
@@ -100,7 +99,6 @@ def parse_date_any(v) -> date | None:
         except Exception:
             return None
 
-    # yyyy-mm-dd
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
     if m:
         yy, mm, dd = map(int, m.groups())
@@ -120,7 +118,6 @@ def parse_date_any(v) -> date | None:
         except Exception:
             return None
 
-    # pandas fallback
     try:
         dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
         if pd.isna(dt):
@@ -193,11 +190,7 @@ def fmt_percent(v) -> str:
 
 
 def status_accent(status_text: str) -> str:
-    """
-    Возвращает "green" | "yellow" | "red" | "gray"
-    """
     s = norm_col(status_text)
-
     if "останов" in s or "приостанов" in s:
         return "red"
     if "проектир" in s:
@@ -208,12 +201,6 @@ def status_accent(status_text: str) -> str:
 
 
 def works_accent(works_text: str) -> str:
-    """
-    Светофор по работам:
-    зелёный = ведутся/да/выполняются
-    красный = нет/не ведутся/приостановлены
-    иначе серый
-    """
     s = norm_col(works_text)
     if any(x in s for x in ["нет", "не вед", "не выполня", "останов", "приостанов"]):
         return "red"
@@ -223,10 +210,6 @@ def works_accent(works_text: str) -> str:
 
 
 def updated_accent(updated_at_value) -> tuple[str, str]:
-    """
-    1-7 зеленый, 7-14 желтый, >14 красный.
-    Если даты нет — серый.
-    """
     d = parse_date_any(updated_at_value)
     if not d:
         return "gray", "—"
@@ -263,7 +246,6 @@ ABBR_MAP = {
     "одкб": ["областнаядетскаяклиническаябольница", "детскаяклиническаябольница", "клиническаябольница"],
     "црб": ["центральнаярайоннаябольница", "районнаябольница"],
     "фок": ["физкультурнооздоровительныйкомплекс", "физкультурныйкомплекс", "оздоровительныйкомплекс"],
-    "дк": ["домкультуры", "культурнодосуговыйцентр", "центркультуры"],
 }
 
 
@@ -272,11 +254,9 @@ def expand_query_tokens(q_raw: str) -> list[str]:
     qn = normalize_search_text(q)
     tokens = [qn] if qn else []
 
-    # точное сокращение
     if q in ABBR_MAP:
         tokens.extend(ABBR_MAP[q])
 
-    # сокращение как часть строки
     for k, variants in ABBR_MAP.items():
         if k in q:
             tokens.extend(variants)
@@ -286,6 +266,23 @@ def expand_query_tokens(q_raw: str) -> list[str]:
         if t and t not in out:
             out.append(t)
     return out
+
+
+def normalize_url(url: str) -> str:
+    """
+    Исправляет частую проблему:
+    если в таблице лежит "docs.google.com/...." без https://,
+    Streamlit воспринимает как относительный путь и уводит обратно в приложение.
+    """
+    u = safe_text(url, fallback="")
+    if not u or u == "—":
+        return ""
+    u = u.strip()
+    if u.startswith("//"):
+        u = "https:" + u
+    if not (u.startswith("http://") or u.startswith("https://")):
+        u = "https://" + u
+    return u
 
 
 # =============================
@@ -321,7 +318,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    col_id = pick_col(df, ["id", "ID"])
     col_sector = pick_col(df, ["отрасль", "sector"])
     col_district = pick_col(df, ["район", "district"])
     col_name = pick_col(df, ["object_name", "наименование_объекта", "наименование объекта", "объект", "name"])
@@ -330,7 +326,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     col_status = pick_col(df, ["статус", "status"])
     col_works = pick_col(df, ["works_in_progress", "работы", "works", "work_flag", "вид работ"])
     col_card = pick_col(df, ["card_url", "ссылка_на_карточку", "ссылка на карточку"])
-    col_folder = pick_col(df, ["folder_url", "ссылка_на_папку", "ссылка на папку"])
     col_updated = pick_col(df, ["updated_at", "last_update", "обновлено", "дата обновления"])
 
     passport_map = {
@@ -363,7 +358,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     }
 
     out = pd.DataFrame()
-    out["id"] = df[col_id] if col_id else ""
     out["sector"] = df[col_sector] if col_sector else ""
     out["district"] = df[col_district] if col_district else ""
     out["name"] = df[col_name] if col_name else ""
@@ -372,7 +366,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["status"] = df[col_status] if col_status else ""
     out["work_flag"] = df[col_works] if col_works else ""
     out["card_url"] = df[col_card] if col_card else ""
-    out["folder_url"] = df[col_folder] if col_folder else ""
     out["updated_at"] = df[col_updated] if col_updated else ""
 
     for k, candidates in passport_map.items():
@@ -386,7 +379,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (no divider between hero and filters)
+# STYLES
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -439,8 +432,8 @@ header {visibility: hidden;}
 
 body{ background: var(--bg) !important; }
 
-/* HERO */
-.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 10px; }
+/* HERO (без лишних разделителей, минимальный отступ вниз) */
+.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 6px; }
 .hero{
   width: 100%;
   border-radius: 18px;
@@ -469,10 +462,7 @@ body{ background: var(--bg) !important; }
   border: 1px solid rgba(255,255,255,.16);
   flex: 0 0 auto;
 }
-.hero-crest img{
-  width: 56px; height: 56px; object-fit: contain;
-  filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
-}
+.hero-crest img{ width: 56px; height: 56px; object-fit: contain; filter: drop-shadow(0 6px 10px rgba(0,0,0,.35)); }
 .hero-titles{ flex: 1 1 auto; min-width: 0; }
 .hero-ministry{ color: rgba(255,255,255,.95); font-weight: 900; font-size: 20px; line-height: 1.15; }
 .hero-app{ margin-top: 6px; color: rgba(255,255,255,.92); font-weight: 800; font-size: 16px; }
@@ -482,7 +472,7 @@ body{ background: var(--bg) !important; }
   .hero-row{ align-items:center; }
 }
 
-/* Панель фильтров — сразу под шапкой без разделителей */
+/* Controls (прямо под шапкой, без лишних полос/разделений) */
 .controls{
   background: var(--panel);
   border: 1px solid var(--border);
@@ -492,23 +482,13 @@ body{ background: var(--bg) !important; }
   margin: 0 0 12px 0;
 }
 .controls-top{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  display:flex; align-items:center; justify-content:space-between;
+  gap: 12px; margin-bottom: 10px;
 }
-.controls-title{
-  font-weight: 950;
-  font-size: 14px;
-  color: var(--text);
-}
-.controls-hint{
-  font-size: 12px;
-  color: var(--muted);
-}
+.controls-title{ font-weight: 950; font-size: 14px; color: var(--text); }
+.controls-hint{ font-size: 12px; color: var(--muted); }
 
-/* Виджеты */
+/* Widgets */
 div[data-baseweb="select"] > div{
   border-radius: 12px !important;
   border: 1px solid var(--border) !important;
@@ -533,6 +513,10 @@ label{ color: var(--muted) !important; font-weight: 900 !important; }
   position: relative;
   overflow: hidden;
 }
+.card.border-green{ border-color: var(--green); }
+.card.border-yellow{ border-color: var(--yellow); }
+.card.border-red{ border-color: var(--red); }
+.card.border-gray{ border-color: var(--gray); }
 
 /* subtle inner glow */
 .card:after{
@@ -545,13 +529,6 @@ label{ color: var(--muted) !important; font-weight: 900 !important; }
   pointer-events:none;
 }
 
-/* border colors */
-.card.border-green{ border-color: var(--green); }
-.card.border-yellow{ border-color: var(--yellow); }
-.card.border-red{ border-color: var(--red); }
-.card.border-gray{ border-color: var(--gray); }
-
-/* Title pill */
 .card-title{
   display:block;
   font-size: 18px;
@@ -602,7 +579,6 @@ label{ color: var(--muted) !important; font-weight: 900 !important; }
 .tag-red{ background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.18); }
 .tag-gray{ background: var(--chip); }
 
-/* Actions (only one button now) */
 .card-actions{ display:flex; gap: 12px; margin-top: 12px; }
 .a-btn{
   flex: 1 1 0;
@@ -620,7 +596,7 @@ label{ color: var(--muted) !important; font-weight: 900 !important; }
 .a-btn:hover{ transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,.10); }
 .a-btn.disabled{ opacity: .45; pointer-events: none; }
 
-/* Details */
+/* Passport details */
 details{
   margin-top: 12px;
   background: rgba(255,255,255,.04);
@@ -653,7 +629,6 @@ summary::-webkit-details-marker{ display:none; }
 }
 .row b{ color: var(--text); }
 
-/* Soft issues box */
 .issue-box{
   border: 1px solid var(--soft-red-bd);
   background: var(--soft-red-bg);
@@ -664,20 +639,20 @@ summary::-webkit-details-marker{ display:none; }
   line-height: 1.35;
 }
 
-/* bottom collapse link */
-.collapse-link{
+/* real collapse button */
+.collapse-btn{
   display:inline-block;
   margin-top: 10px;
   font-weight: 900;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--muted) !important;
   text-decoration:none !important;
   border: 1px solid var(--border);
   background: rgba(255,255,255,.05);
   padding: 8px 10px;
   border-radius: 12px;
 }
-.collapse-link:hover{ color: var(--text); }
+.collapse-btn:hover{ color: var(--text) !important; }
 
 @media (max-width: 900px){
   .card-grid{ grid-template-columns: 1fr; }
@@ -718,7 +693,7 @@ st.markdown(
 
 
 # =============================
-# AUTH (PASSWORD)
+# AUTH
 # =============================
 def get_app_password() -> str | None:
     try:
@@ -728,7 +703,6 @@ def get_app_password() -> str | None:
 
 
 APP_PASSWORD = get_app_password()
-
 if APP_PASSWORD:
     if "auth_ok" not in st.session_state:
         st.session_state.auth_ok = False
@@ -771,21 +745,20 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# CONTROLS (new design)
+# CONTROLS (без разделителей под шапкой)
 # =============================
 st.markdown(
     """
 <div class="controls">
   <div class="controls-top">
-    <div class="controls-title">Управление списком</div>
-    <div class="controls-hint">Поиск поддерживает сокращения: ФАП, ОДКБ, ЦРБ, ФОК…</div>
+    <div class="controls-title">Фильтры и поиск</div>
+    <div class="controls-hint">Сокращения: ФАП, ОДКБ, ЦРБ, ФОК…</div>
   </div>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-# Рисуем виджеты сразу после панели, чтобы выглядело как единый блок
 c1, c2, c3, c4 = st.columns([1, 1, 1, 1.4])
 with c1:
     sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
@@ -794,11 +767,12 @@ with c2:
 with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 with c4:
+    # ВАЖНО: НЕ в form -> поиск применяется без “кнопки”
     q_raw = st.text_input("🔎 Поиск", value="", key="f_search", placeholder="Напр.: ФАП, ОДКБ, школа 500, Тускарная...")
 
 
 # =============================
-# APPLY FILTERS + LIVE SEARCH
+# APPLY FILTERS + SEARCH
 # =============================
 filtered = df.copy()
 
@@ -844,14 +818,13 @@ st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
 
 
 # =============================
-# PASSPORT RENDER
+# PASSPORT HTML
 # =============================
-def passport_html(row: pd.Series) -> str:
+def passport_html(row: pd.Series, uid: str) -> str:
     issues = safe_text(row.get("issues", ""))
 
     blocks = []
 
-    # Проблемы — мягко красным, если есть
     if issues not in ("—", ""):
         blocks.append(
             f"""
@@ -946,8 +919,14 @@ def passport_html(row: pd.Series) -> str:
     if not blocks:
         blocks.append('<div class="row" style="color:var(--muted)">Нет паспортных данных для отображения.</div>')
 
-    # “Свернуть снизу”: якорь на summary (ниже добавим id)
-    blocks.append('<a class="collapse-link" href="#passport_top">⬆️ Свернуть паспорт</a>')
+    # ✅ РЕАЛЬНО закрывает details: снимает атрибут open
+    blocks.append(
+        f"""
+<a class="collapse-btn" href="#{uid}" onclick="this.closest('details').removeAttribute('open'); return false;">
+  ⬆️ Свернуть паспорт
+</a>
+"""
+    )
 
     return "\n".join(blocks)
 
@@ -956,6 +935,8 @@ def passport_html(row: pd.Series) -> str:
 # CARD RENDER
 # =============================
 def render_card(row: pd.Series, idx: int):
+    uid = f"card_{idx}"
+
     title = safe_text(row.get("name", ""), fallback="Объект")
     sector = safe_text(row.get("sector", ""), fallback="—")
     district = safe_text(row.get("district", ""), fallback="—")
@@ -965,23 +946,21 @@ def render_card(row: pd.Series, idx: int):
     status = safe_text(row.get("status", ""), fallback="—")
     work_flag = safe_text(row.get("work_flag", ""), fallback="—")
 
-    card_url = safe_text(row.get("card_url", ""), fallback="")
+    card_url = normalize_url(row.get("card_url", ""))
 
-    # Цвет рамки по статусу
+    # border by status
     s_acc = status_accent(status)
     border_cls = f"border-{s_acc}"
 
-    # Светофор “работы”
+    # works traffic light (soft)
     w_acc = works_accent(work_flag)
     work_tag_cls = "tag tag-gray"
     if w_acc == "green":
         work_tag_cls = "tag tag-green"
     elif w_acc == "red":
         work_tag_cls = "tag tag-red"
-    else:
-        work_tag_cls = "tag tag-gray"
 
-    # Светофор “обновлено”
+    # updated traffic light
     u_acc, u_txt = updated_accent(row.get("updated_at", ""))
     upd_tag_cls = "tag tag-gray"
     if u_acc == "green":
@@ -991,7 +970,7 @@ def render_card(row: pd.Series, idx: int):
     elif u_acc == "red":
         upd_tag_cls = "tag tag-red"
 
-    # Статус-тег
+    # status tag
     st_tag_cls = "tag tag-gray"
     if s_acc == "green":
         st_tag_cls = "tag tag-green"
@@ -1001,16 +980,16 @@ def render_card(row: pd.Series, idx: int):
         st_tag_cls = "tag tag-red"
 
     btn_card = (
-        f'<a class="a-btn" href="{card_url}" target="_blank">📄 Открыть карточку</a>'
-        if card_url and card_url != "—"
+        f'<a class="a-btn" href="{card_url}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
+        if card_url
         else '<span class="a-btn disabled">📄 Открыть карточку</span>'
     )
 
-    passport = passport_html(row)
+    passport = passport_html(row, uid)
 
     st.markdown(
         f"""
-<div class="card {border_cls}">
+<div class="card {border_cls}" id="{uid}">
   <div class="card-title">{title}</div>
 
   <div class="chips">
@@ -1034,7 +1013,7 @@ def render_card(row: pd.Series, idx: int):
   </div>
 
   <details>
-    <summary id="passport_top">🧾 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть</summary>
+    <summary>🧾 Паспорт объекта и контрольные показатели</summary>
     {passport}
   </details>
 </div>
@@ -1046,6 +1025,5 @@ def render_card(row: pd.Series, idx: int):
 # =============================
 # OUTPUT
 # =============================
-for i, r in enumerate(filtered.itertuples(index=False), start=0):
-    # преобразуем обратно в Series, чтобы .get работал одинаково
-    render_card(pd.Series(r._asdict()), i)
+for i, r in enumerate(filtered.to_dict(orient="records"), start=0):
+    render_card(pd.Series(r), i)
