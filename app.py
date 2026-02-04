@@ -104,31 +104,34 @@ def try_parse_date(v) -> date | None:
     except Exception:
         pass
 
-    if isinstance(v, date) and not isinstance(v, datetime):
-        return v
     if isinstance(v, datetime):
         return v.date()
+    if isinstance(v, date):
+        return v
 
     s = str(v).strip()
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
+    # Excel serial date (например 45234)
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
-            dt = pd.to_datetime(num, unit="D", origin="1899-12-30", errors="ASSERT=None)  # noqa
-        except Exception:
             dt = pd.to_datetime(num, unit="D", origin="1899-12-30", errors="coerce")
-        if pd.isna(dt):
+            if pd.isna(dt):
+                return None
+            return dt.date()
+        except Exception:
             return None
-        return dt.date()
 
+    # популярные форматы
     for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(s, fmt).date()
         except Exception:
             pass
 
+    # общий парсер
     try:
         dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
         if pd.isna(dt):
@@ -170,9 +173,9 @@ def date_fmt(v) -> str:
 def percent_fmt(v) -> str:
     """
     Готовность:
-    - если 0.38 -> 38%
-    - если 38 -> 38%
-    - если '38%' -> 38%
+    - 0.38 -> 38%
+    - 38 -> 38%
+    - '38%' -> 38%
     """
     s = safe_text(v, fallback="—")
     if s == "—":
@@ -180,7 +183,6 @@ def percent_fmt(v) -> str:
     s0 = str(s).strip()
 
     if "%" in s0:
-        # уже проценты
         s1 = s0.replace("%", "").replace(",", ".").strip()
         try:
             x = float(s1)
@@ -188,16 +190,12 @@ def percent_fmt(v) -> str:
         except Exception:
             return s0
 
-    # число
     try:
         x = float(str(s0).replace(" ", "").replace("\u00A0", "").replace(",", "."))
-        # если 0..1, считаем долей
         if 0 <= x <= 1:
             return f"{int(round(x * 100))}%"
-        # если 1..100, считаем уже процентом
         if 1 < x <= 100:
             return f"{int(round(x))}%"
-        # иначе вернём как есть
         return f"{x}%"
     except Exception:
         return s0
@@ -224,6 +222,7 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
+    # fallback local xlsx
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -256,12 +255,11 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame()
 
-    out["id"] = df[col("id", "ID")] if col("id", "ID") else ""
     out["sector"] = df[col("sector", "отрасль")] if col("sector", "отрасль") else ""
     out["district"] = df[col("district", "район")] if col("district", "район") else ""
-    out["name"] = df[
-        col("name", "object_name", "наименование_объекта", "наименование объекта", "объект")
-    ] if col("name", "object_name", "наименование_объекта", "наименование объекта", "объект") else ""
+    out["name"] = df[col("name", "object_name", "наименование_объекта", "наименование объекта", "объект")] if col(
+        "name", "object_name", "наименование_объекта", "наименование объекта", "объект"
+    ) else ""
     out["address"] = df[col("address", "адрес")] if col("address", "адрес") else ""
     out["responsible"] = df[col("responsible", "ответственный")] if col("responsible", "ответственный") else ""
     out["status"] = df[col("status", "статус")] if col("status", "статус") else ""
@@ -281,45 +279,21 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку"
     ) else ""
 
-    # программы/соглашение/параметры/прочее
-    out["state_program"] = df[col("state_program")] if col("state_program") else ""
-    out["federal_project"] = df[col("federal_project")] if col("federal_project") else ""
-    out["regional_program"] = df[col("regional_program")] if col("regional_program") else ""
-
-    out["agreement"] = df[col("agreement")] if col("agreement") else ""
-    out["agreement_date"] = df[col("agreement_date")] if col("agreement_date") else ""
-    out["agreement_amount"] = df[col("agreement_amount")] if col("agreement_amount") else ""
-
-    out["capacity_seats"] = df[col("capacity_seats")] if col("capacity_seats") else ""
-    out["area_m2"] = df[col("area_m2")] if col("area_m2") else ""
-    out["target_deadline"] = df[col("target_deadline")] if col("target_deadline") else ""
-
-    out["design"] = df[col("design")] if col("design") else ""
-    out["psd_cost"] = df[col("psd_cost")] if col("psd_cost") else ""
-    out["designer"] = df[col("designer")] if col("designer") else ""
-
-    out["expertise"] = df[col("expertise")] if col("expertise") else ""
-    out["expertise_conclusion"] = df[col("expertise_conclusion")] if col("expertise_conclusion") else ""
-    out["expertise_date"] = df[col("expertise_date")] if col("expertise_date") else ""
-
-    out["rns"] = df[col("rns")] if col("rns") else ""
-    out["rns_date"] = df[col("rns_date")] if col("rns_date") else ""
-    out["rns_expiry"] = df[col("rns_expiry")] if col("rns_expiry") else ""
-
-    out["contract"] = df[col("contract")] if col("contract") else ""
-    out["contract_date"] = df[col("contract_date")] if col("contract_date") else ""
-    out["contractor"] = df[col("contractor")] if col("contractor") else ""
-    out["contract_price"] = df[col("contract_price")] if col("contract_price") else ""
-
-    out["end_date_plan"] = df[col("end_date_plan")] if col("end_date_plan") else ""
-    out["end_date_fact"] = df[col("end_date_fact")] if col("end_date_fact") else ""
-    out["readiness"] = df[col("readiness")] if col("readiness") else ""
-    out["paid"] = df[col("paid")] if col("paid") else ""
-
-    # ФОТО (если добавите колонку)
-    out["photo_url"] = df[col("photo_url", "photo", "фото", "ссылка на фото")] if col(
-        "photo_url", "photo", "фото", "ссылка на фото"
-    ) else ""
+    # дополнительные поля (как в вашем реестре)
+    fields = [
+        "state_program", "federal_project", "regional_program",
+        "agreement", "agreement_date", "agreement_amount",
+        "capacity_seats", "area_m2", "target_deadline",
+        "design", "psd_cost", "designer",
+        "expertise", "expertise_conclusion", "expertise_date",
+        "rns", "rns_date", "rns_expiry",
+        "contract", "contract_date", "contractor", "contract_price",
+        "end_date_plan", "end_date_fact", "readiness", "paid",
+        "photo_url",
+    ]
+    for f in fields:
+        c = col(f, f.replace("_", " "), f.upper())
+        out[f] = df[c] if c else ""
 
     for c in out.columns:
         out[c] = out[c].astype(str).replace({"nan": "", "None": "", "null": ""})
@@ -328,7 +302,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (Theme-aware)
+# STYLES (dark-mode aware)
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -347,24 +321,26 @@ st.markdown(
   --chip-bd: rgba(15,23,42,.10);
   --btn-bg: rgba(255,255,255,.95);
   --btn-bd: rgba(15,23,42,.12);
-  --hr: rgba(15,23,42,.12);
 }
 
 @media (prefers-color-scheme: dark){
   :root{
     --bg: #0b1220;
     --card: #111a2b;
-    --card2: rgba(255,255,255,.04);
+    --card2: rgba(255,255,255,.05);
     --text: rgba(255,255,255,.92);
     --muted: rgba(255,255,255,.70);
     --border: rgba(255,255,255,.12);
     --shadow: rgba(0,0,0,.35);
     --chip-bg: rgba(255,255,255,.06);
     --chip-bd: rgba(255,255,255,.12);
-    --btn-bg: rgba(17,26,43,.90);
+    --btn-bg: rgba(17,26,43,.92);
     --btn-bd: rgba(255,255,255,.14);
-    --hr: rgba(255,255,255,.14);
   }
+}
+
+html, body, [data-testid="stAppViewContainer"]{
+  background: var(--bg) !important;
 }
 
 .block-container { padding-top: 24px !important; max-width: 1200px; }
@@ -374,10 +350,6 @@ div[data-testid="stHorizontalBlock"]{ gap: 14px; }
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
-
-html, body, [data-testid="stAppViewContainer"]{
-  background: var(--bg) !important;
-}
 
 /* HERO */
 .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 14px; }
@@ -451,21 +423,19 @@ html, body, [data-testid="stAppViewContainer"]{
   border-radius: 16px;
   padding: 16px;
   box-shadow: 0 10px 22px var(--shadow);
-  margin-bottom: 14px;
-  position: relative;
+  margin-bottom: 10px;
 }
 .card[data-accent="green"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(34,197,94,.55); }
 .card[data-accent="yellow"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(245,158,11,.55); }
 .card[data-accent="red"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(239,68,68,.55); }
 .card[data-accent="blue"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(59,130,246,.45); }
 
-/* Красивее заголовок объекта */
 .title-bar{
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   justify-content:space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .card-title{
   font-size: 20px;
@@ -483,14 +453,13 @@ html, body, [data-testid="stAppViewContainer"]{
 }
 @media (prefers-color-scheme: dark){
   .card-title span{
-    background: linear-gradient(90deg, rgba(147,197,253,.45), rgba(134,239,172,.30), rgba(253,230,138,.30));
+    background: linear-gradient(90deg, rgba(147,197,253,.45), rgba(134,239,172,.28), rgba(253,230,138,.25));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
 }
 
-/* Фото-превью */
 .photo{
   width: 132px;
   height: 82px;
@@ -500,31 +469,18 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--card2);
   flex: 0 0 auto;
 }
-.photo img{
-  width:100%;
-  height:100%;
-  object-fit: cover;
-  display:block;
-}
+.photo img{ width:100%; height:100%; object-fit: cover; display:block; }
 
 .card-subchips{
-  display:flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: -2px;
+  display:flex; gap: 8px; flex-wrap: wrap;
   margin-bottom: 10px;
 }
 .chip{
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
+  display:inline-flex; align-items:center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px;
-  color: var(--text);
-  opacity: .95;
+  font-size: 13px; color: var(--text);
 }
 
 .card-grid{
@@ -533,64 +489,42 @@ html, body, [data-testid="stAppViewContainer"]{
   gap: 8px 18px;
   margin-top: 6px;
 }
-.card-item{
-  font-size: 14px;
-  color: var(--text);
-}
+.card-item{ font-size: 14px; color: var(--text); }
 .card-item b{ color: var(--text); }
 
 .card-tags{
-  display:flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  display:flex; gap: 10px; flex-wrap: wrap;
   margin-top: 10px;
 }
 .tag{
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
+  display:inline-flex; align-items:center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px;
-  color: var(--text);
+  font-size: 13px; color: var(--text);
   font-weight: 900;
 }
-.tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
 .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
+.tag-gray{ opacity: .92; }
 
 .card-actions{
-  display:flex;
-  gap: 12px;
-  margin-top: 12px;
+  display:flex; gap: 12px; margin-top: 12px;
 }
 .a-btn{
   flex: 1 1 0;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  display:flex; justify-content:center; align-items:center; gap: 8px;
+  padding: 10px 12px; border-radius: 12px;
   border: 1px solid var(--btn-bd);
   background: var(--btn-bg);
   text-decoration:none !important;
   color: var(--text) !important;
-  font-weight: 900;
-  font-size: 14px;
+  font-weight: 900; font-size: 14px;
   transition: .12s ease-in-out;
 }
-.a-btn:hover{
-  transform: translateY(-1px);
-  box-shadow: 0 10px 18px rgba(0,0,0,.10);
-}
-.a-btn.disabled{
-  opacity: .45;
-  pointer-events:none;
-}
+.a-btn:hover{ transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,.10); }
+.a-btn.disabled{ opacity: .45; pointer-events:none; }
 
 .section{
   margin-top: 12px;
@@ -599,21 +533,9 @@ html, body, [data-testid="stAppViewContainer"]{
   border: 1px solid var(--border);
   background: var(--card2);
 }
-.section-title{
-  font-weight: 950;
-  color: var(--text);
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-.row{
-  display:flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  color: var(--text);
-  font-size: 13.5px;
-}
+.section-title{ font-weight: 950; color: var(--text); margin-bottom: 8px; font-size: 14px; }
+.row{ color: var(--text); font-size: 13.5px; margin-bottom: 4px; }
 .row b{ color: var(--text); }
-.row .muted{ color: var(--muted); }
 
 .issue-box{
   border: 1px solid rgba(239,68,68,.25);
@@ -628,7 +550,6 @@ html, body, [data-testid="stAppViewContainer"]{
   .card-grid{ grid-template-columns: 1fr; }
   .card-actions{ flex-direction: column; }
   .photo{ width: 100%; height: 140px; }
-  .title-bar{ flex-direction: column; align-items: flex-start; }
 }
 </style>
 """,
@@ -703,10 +624,7 @@ if APP_PASSWORD:
 # =============================
 raw = load_data()
 if raw.empty:
-    st.error(
-        "Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets "
-        "или наличие .xlsx в репозитории."
-    )
+    st.error("Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets или наличие .xlsx в репозитории.")
     st.stop()
 
 df = normalize_schema(raw)
@@ -787,7 +705,7 @@ def render_card(row: pd.Series):
     u_col, u_txt = update_color(row.get("updated_at", ""))
 
     s_tag = {"green": "tag-green", "yellow": "tag-yellow", "red": "tag-red"}.get(accent, "tag-gray")
-    w_tag = {"green": "tag-green", "yellow": "tag-yellow", "red": "tag-red"}.get(w_col, "tag-gray")
+    w_tag = {"green": "tag-green", "red": "tag-red"}.get(w_col, "tag-gray")
     u_tag = {"green": "tag-green", "yellow": "tag-yellow", "red": "tag-red"}.get(u_col, "tag-gray")
 
     btn_card = (
@@ -801,11 +719,9 @@ def render_card(row: pd.Series):
         else '<span class="a-btn disabled">📁 Открыть папку</span>'
     )
 
-    # Фото (если есть)
-    photo_html = ""
-    if photo_url and photo_url != "—":
-        photo_html = f'<div class="photo"><img src="{photo_url}" alt="Фото объекта"/></div>'
+    photo_html = f'<div class="photo"><img src="{photo_url}" alt="Фото объекта"/></div>' if photo_url and photo_url != "—" else ""
 
+    # ШАПКА карточки
     st.markdown(
         f"""
 <div class="card" data-accent="{accent}">
@@ -839,12 +755,13 @@ def render_card(row: pd.Series):
         unsafe_allow_html=True,
     )
 
+    # СВОРАЧИВАЕМЫЙ “ПАСПОРТ”
     with st.expander("📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть", expanded=False):
         st.markdown('<div class="section"><div class="section-title">⚠️ Проблемные вопросы</div>', unsafe_allow_html=True)
         if issues != "—":
             st.markdown(f'<div class="issue-box">{issues}</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="row"><span class="muted">—</span></div>', unsafe_allow_html=True)
+            st.markdown('<div class="row">—</div>', unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="section"><div class="section-title">🏛️ Программы</div>', unsafe_allow_html=True)
