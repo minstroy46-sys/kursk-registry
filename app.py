@@ -55,8 +55,7 @@ def read_local_crest_b64() -> str | None:
     p = Path(__file__).parent / "assets" / "gerb.png"
     if not p.exists():
         return None
-    data = p.read_bytes()
-    return base64.b64encode(data).decode("utf-8")
+    return base64.b64encode(p.read_bytes()).decode("utf-8")
 
 
 def move_prochie_to_bottom(items: list[str]) -> list[str]:
@@ -72,10 +71,12 @@ def move_prochie_to_bottom(items: list[str]) -> list[str]:
     return rest + prochie
 
 
-# ---------- dates ----------
+# =============================
+# DATE PARSING (Google Sheets serial / strings)
+# =============================
 def _to_excel_serial_date(n: float) -> date | None:
     try:
-        base = date(1899, 12, 30)  # Google Sheets compatible
+        base = date(1899, 12, 30)  # Google Sheets serial base
         return base + timedelta(days=int(n))
     except Exception:
         return None
@@ -99,6 +100,7 @@ def parse_any_date(v) -> date | None:
     if not s:
         return None
 
+    # numeric serial?
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             n = float(s)
@@ -123,9 +125,7 @@ def parse_any_date(v) -> date | None:
 
 
 def fmt_date_ru(d: date | None, fallback="—") -> str:
-    if not d:
-        return fallback
-    return d.strftime("%d.%m.%Y")
+    return d.strftime("%d.%m.%Y") if d else fallback
 
 
 def days_since(d: date | None) -> int | None:
@@ -164,10 +164,6 @@ def works_traffic_class(v) -> tuple[str, str]:
 
 
 def status_tone(status_text: str) -> str:
-    """
-    Возвращает тон для оформления карточки:
-    red / yellow / green / gray
-    """
     s = norm_col(status_text)
     if "останов" in s or "приостанов" in s:
         return "red"
@@ -200,19 +196,17 @@ def load_data() -> pd.DataFrame:
     except Exception:
         csv_url = None
 
-    df = pd.DataFrame()
-
-    if csv_url:
-        try:
-            df = pd.read_csv(csv_url)
-        except Exception:
-            try:
-                df = pd.read_csv(csv_url, sep=";")
-            except Exception:
-                df = pd.DataFrame()
-
-    if df is None or df.empty:
+    if not csv_url:
         return pd.DataFrame()
+
+    # Try CSV
+    try:
+        df = pd.read_csv(csv_url)
+    except Exception:
+        try:
+            df = pd.read_csv(csv_url, sep=";")
+        except Exception:
+            return pd.DataFrame()
 
     df.columns = [str(c).strip() for c in df.columns]
     return df
@@ -222,7 +216,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    col_id = pick_col(df, ["id", "ID"])
+    col_id = pick_col(df, ["id"])
     col_sector = pick_col(df, ["sector", "отрасль"])
     col_district = pick_col(df, ["district", "район"])
     col_name = pick_col(df, ["object_name", "name", "наименование_объекта", "наименование объекта"])
@@ -236,35 +230,19 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     col_folder = pick_col(df, ["folder_url", "ссылка_на_папку", "ссылка на папку"])
     col_address = pick_col(df, ["address", "адрес"])
 
-    passport_cols = {
-        "state_program": pick_col(df, ["state_program"]),
-        "federal_project": pick_col(df, ["federal_project"]),
-        "regional_program": pick_col(df, ["regional_program"]),
-        "agreement": pick_col(df, ["agreement"]),
-        "agreement_date": pick_col(df, ["agreement_date"]),
-        "agreement_amount": pick_col(df, ["agreement_amount"]),
-        "capacity_seats": pick_col(df, ["capacity_seats"]),
-        "area_m2": pick_col(df, ["area_m2"]),
-        "target_deadline": pick_col(df, ["target_deadline"]),
-        "design": pick_col(df, ["design"]),
-        "psd_cost": pick_col(df, ["psd_cost"]),
-        "designer": pick_col(df, ["designer"]),
-        "expertise": pick_col(df, ["expertise"]),
-        "expertise_conclusion": pick_col(df, ["expertise_conclusion"]),
-        "expertise_date": pick_col(df, ["expertise_date"]),
-        "rns": pick_col(df, ["rns"]),
-        "rns_date": pick_col(df, ["rns_date"]),
-        "rns_expiry": pick_col(df, ["rns_expiry"]),
-        "contract": pick_col(df, ["contract"]),
-        "contract_date": pick_col(df, ["contract_date"]),
-        "contractor": pick_col(df, ["contractor"]),
-        "contract_price": pick_col(df, ["contract_price"]),
-        "end_date_plan": pick_col(df, ["end_date_plan"]),
-        "end_date_fact": pick_col(df, ["end_date_fact"]),
-        "readiness": pick_col(df, ["readiness"]),
-        "paid": pick_col(df, ["paid"]),
-        "updated_at": pick_col(df, ["updated_at"]),
-    }
+    # паспортные поля (как в твоей структуре)
+    passport_cols = [
+        "state_program", "federal_project", "regional_program",
+        "agreement", "agreement_date", "agreement_amount",
+        "capacity_seats", "area_m2", "target_deadline",
+        "design", "psd_cost", "designer",
+        "expertise", "expertise_conclusion", "expertise_date",
+        "rns", "rns_date", "rns_expiry",
+        "contract", "contract_date", "contractor", "contract_price",
+        "end_date_plan", "end_date_fact",
+        "readiness", "paid",
+        "updated_at",
+    ]
 
     out = pd.DataFrame()
     out["id"] = df[col_id] if col_id else ""
@@ -281,7 +259,8 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["card_url"] = df[col_card] if col_card else ""
     out["folder_url"] = df[col_folder] if col_folder else ""
 
-    for k, c in passport_cols.items():
+    for k in passport_cols:
+        c = pick_col(df, [k])
         out[k] = df[c] if c else ""
 
     for c in out.columns:
@@ -291,14 +270,13 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (финальный дизайн + красивый expander)
+# STYLES
 # =============================
 crest_b64 = read_local_crest_b64()
 
 st.markdown(
     """
 <style>
-/* --- Page base --- */
 .block-container { padding-top: 24px !important; max-width: 1200px; }
 @media (max-width: 1200px){ .block-container { max-width: 96vw; } }
 div[data-testid="stHorizontalBlock"]{ gap: 14px; }
@@ -307,7 +285,7 @@ div[data-testid="stHorizontalBlock"]{ gap: 14px; }
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-/* --- Hero (unchanged) --- */
+/* --- Hero --- */
 .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 14px; }
 .hero{
   width: 100%;
@@ -372,9 +350,7 @@ header {visibility: hidden;}
   .hero-row{ align-items:center; }
 }
 
-/* =========================
-   CARD (финальный)
-   ========================= */
+/* --- Card --- */
 .card{
   background: linear-gradient(180deg, rgba(15,23,42,.015), rgba(255,255,255,1) 36%);
   border: 1px solid rgba(15, 23, 42, .10);
@@ -385,7 +361,6 @@ header {visibility: hidden;}
   overflow: hidden;
 }
 
-/* тонкая цветная полоса слева */
 .card-accent{
   height: 100%;
   width: 6px;
@@ -400,21 +375,12 @@ header {visibility: hidden;}
   padding: 14px 16px 12px 16px;
 }
 
-.card-header{
-  display:flex;
-  gap: 12px;
-  align-items:flex-start;
-  justify-content: space-between;
-}
-
-.title-wrap{ min-width: 0; }
 .card-title{
   font-size: 18px;
   line-height: 1.2;
   font-weight: 950;
   margin: 0;
   color: #0f172a;
-  letter-spacing: .1px;
 }
 
 .card-subchips{
@@ -434,25 +400,18 @@ header {visibility: hidden;}
   background: rgba(15,23,42,.03);
   font-size: 12.5px;
   color: rgba(15,23,42,.92);
-  font-weight: 800;
+  font-weight: 850;
 }
-
-.chip-muted{
-  background: rgba(15,23,42,.02);
-  opacity: .95;
-}
+.chip-muted{ background: rgba(15,23,42,.02); opacity: .95; }
 
 .card-grid{
-  display: grid;
+  display:grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px 18px;
   margin-top: 10px;
 }
-.card-item{
-  font-size: 14px;
-  color: rgba(15, 23, 42, .92);
-}
-.card-item b{ color: rgba(15, 23, 42, .95); }
+.card-item{ font-size: 14px; color: rgba(15,23,42,.92); }
+.card-item b{ color: rgba(15,23,42,.95); }
 
 .card-tags{
   display:flex;
@@ -471,20 +430,16 @@ header {visibility: hidden;}
   background: rgba(15, 23, 42, .03);
   font-size: 13px;
   color: rgba(15, 23, 42, .92);
-  font-weight: 850;
+  font-weight: 900;
 }
-
 .tag-status{ font-weight: 950; }
+
 .tag-green{ background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.22); }
 .tag-yellow{ background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.09); border-color: rgba(239,68,68,.20); }
 .tag-gray{ background: rgba(15,23,42,.03); border-color: rgba(15,23,42,.10); opacity: .95; }
 
-.card-actions{
-  display:flex;
-  gap: 12px;
-  margin-top: 12px;
-}
+.card-actions{ display:flex; gap: 12px; margin-top: 12px; }
 
 .a-btn{
   flex: 1 1 0;
@@ -498,7 +453,7 @@ header {visibility: hidden;}
   background: rgba(255,255,255,.98);
   text-decoration:none !important;
   color: rgba(15, 23, 42, .92) !important;
-  font-weight: 900;
+  font-weight: 950;
   font-size: 14px;
   transition: .12s ease-in-out;
 }
@@ -511,7 +466,7 @@ header {visibility: hidden;}
   border-top: 1px dashed rgba(15, 23, 42, .14);
 }
 
-/* ====== Expander (красивый “кнопочный” заголовок) ====== */
+/* --- Expander --- */
 div[data-testid="stExpander"] details{
   border-radius: 14px !important;
   border: 1px solid rgba(15,23,42,.10) !important;
@@ -538,7 +493,6 @@ div[data-testid="stExpander"] details summary:before{
 }
 div[data-testid="stExpander"] details[open] summary:before{ content:"▾"; }
 
-/* details blocks inside expander */
 .detail-block{
   margin-top: 10px;
   padding: 12px 12px;
@@ -546,10 +500,7 @@ div[data-testid="stExpander"] details[open] summary:before{ content:"▾"; }
   border: 1px solid rgba(15, 23, 42, .10);
   background: rgba(255,255,255,.92);
 }
-.detail-title{
-  font-weight: 950;
-  margin-bottom: 8px;
-}
+.detail-title{ font-weight: 950; margin-bottom: 8px; }
 .detail-grid{
   display:grid;
   grid-template-columns: 1fr 1fr;
@@ -646,7 +597,7 @@ if APP_PASSWORD:
 # =============================
 raw = load_data()
 if raw.empty:
-    st.error("Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets (публичный CSV Google Sheets).")
+    st.error("Данные не загрузились. Проверьте CSV_URL в Secrets (публичный CSV Google Sheets).")
     st.stop()
 
 df = normalize_schema(raw)
@@ -703,7 +654,7 @@ st.divider()
 
 
 # =============================
-# CARD CONTENT HELPERS
+# DETAIL RENDER
 # =============================
 def _money(v) -> str:
     s = safe_text(v, fallback="—")
@@ -716,44 +667,7 @@ def _money(v) -> str:
         return s
 
 
-def _num(v) -> str:
-    s = safe_text(v, fallback="—")
-    return s
-
-
 def render_details(row: pd.Series):
-    stp = safe_text(row.get("state_program", ""))
-    fp = safe_text(row.get("federal_project", ""))
-    rp = safe_text(row.get("regional_program", ""))
-
-    agreement = safe_text(row.get("agreement", ""))
-    agreement_date = fmt_date_ru(parse_any_date(row.get("agreement_date", "")))
-    agreement_amount = _money(row.get("agreement_amount", ""))
-
-    capacity = safe_text(row.get("capacity_seats", ""))
-    area_m2 = safe_text(row.get("area_m2", ""))
-    target_deadline = fmt_date_ru(parse_any_date(row.get("target_deadline", "")))
-
-    psd_cost = _money(row.get("psd_cost", ""))
-    designer = safe_text(row.get("designer", ""))
-    expertise = safe_text(row.get("expertise", ""))
-    expertise_concl = safe_text(row.get("expertise_conclusion", ""))
-    expertise_date = fmt_date_ru(parse_any_date(row.get("expertise_date", "")))
-
-    rns = safe_text(row.get("rns", ""))
-    rns_date = fmt_date_ru(parse_any_date(row.get("rns_date", "")))
-    rns_expiry = fmt_date_ru(parse_any_date(row.get("rns_expiry", "")))
-
-    contract = safe_text(row.get("contract", ""))
-    contract_date = fmt_date_ru(parse_any_date(row.get("contract_date", "")))
-    contractor = safe_text(row.get("contractor", ""))
-    contract_price = _money(row.get("contract_price", ""))
-
-    end_plan = fmt_date_ru(parse_any_date(row.get("end_date_plan", "")))
-    end_fact = fmt_date_ru(parse_any_date(row.get("end_date_fact", "")))
-    readiness = safe_text(row.get("readiness", ""))
-    paid = _money(row.get("paid", ""))
-
     def block(title, rows: list[tuple[str, str]]):
         rows_html = "\n".join([f'<div class="detail-row"><b>{k}</b> {v}</div>' for k, v in rows])
         st.markdown(
@@ -768,41 +682,87 @@ def render_details(row: pd.Series):
             unsafe_allow_html=True,
         )
 
-    block("🏛️ Программы", [("ГП/СП:", stp), ("ФП:", fp), ("РП:", rp)])
-    block("📑 Соглашение", [("№:", agreement), ("Дата:", agreement_date), ("Сумма:", agreement_amount)])
-    block("📌 Параметры", [("Мощность:", capacity), ("Площадь:", area_m2), ("Целевой срок:", target_deadline)])
+    block(
+        "🏛️ Программы",
+        [
+            ("ГП/СП:", safe_text(row.get("state_program", ""))),
+            ("ФП:", safe_text(row.get("federal_project", ""))),
+            ("РП:", safe_text(row.get("regional_program", ""))),
+        ],
+    )
+
+    block(
+        "📑 Соглашение",
+        [
+            ("№:", safe_text(row.get("agreement", ""))),
+            ("Дата:", fmt_date_ru(parse_any_date(row.get("agreement_date", "")))),
+            ("Сумма:", _money(row.get("agreement_amount", ""))),
+        ],
+    )
+
+    block(
+        "📌 Параметры",
+        [
+            ("Мощность:", safe_text(row.get("capacity_seats", ""))),
+            ("Площадь:", safe_text(row.get("area_m2", ""))),
+            ("Целевой срок:", fmt_date_ru(parse_any_date(row.get("target_deadline", "")))),
+        ],
+    )
+
     block(
         "🧾 ПСД / Экспертиза",
         [
-            ("Стоимость ПСД:", psd_cost),
-            ("Проектировщик:", designer),
-            ("Экспертиза:", expertise),
-            ("Дата экспертизы:", expertise_date),
-            ("Заключение:", expertise_concl),
+            ("Стоимость ПСД:", _money(row.get("psd_cost", ""))),
+            ("Проектировщик:", safe_text(row.get("designer", ""))),
+            ("Экспертиза:", safe_text(row.get("expertise", ""))),
+            ("Дата экспертизы:", fmt_date_ru(parse_any_date(row.get("expertise_date", "")))),
+            ("Заключение:", safe_text(row.get("expertise_conclusion", ""))),
         ],
     )
-    block("🏗️ РНС", [("№ РНС:", rns), ("Дата:", rns_date), ("Срок действия:", rns_expiry)])
-    block("📦 Контракт", [("№:", contract), ("Дата:", contract_date), ("Подрядчик:", contractor), ("Цена:", contract_price)])
+
+    block(
+        "🏗️ РНС",
+        [
+            ("№ РНС:", safe_text(row.get("rns", ""))),
+            ("Дата:", fmt_date_ru(parse_any_date(row.get("rns_date", "")))),
+            ("Срок действия:", fmt_date_ru(parse_any_date(row.get("rns_expiry", "")))),
+        ],
+    )
+
+    block(
+        "📦 Контракт",
+        [
+            ("№:", safe_text(row.get("contract", ""))),
+            ("Дата:", fmt_date_ru(parse_any_date(row.get("contract_date", "")))),
+            ("Подрядчик:", safe_text(row.get("contractor", ""))),
+            ("Цена:", _money(row.get("contract_price", ""))),
+        ],
+    )
+
     block(
         "⏱️ Сроки / Финансы",
-        [("Окончание (план):", end_plan), ("Окончание (факт):", end_fact), ("Готовность:", _num(readiness)), ("Оплачено:", paid)],
+        [
+            ("Окончание (план):", fmt_date_ru(parse_any_date(row.get("end_date_plan", "")))),
+            ("Окончание (факт):", fmt_date_ru(parse_any_date(row.get("end_date_fact", "")))),
+            ("Готовность:", safe_text(row.get("readiness", ""))),
+            ("Оплачено:", _money(row.get("paid", ""))),
+        ],
     )
 
 
 # =============================
-# CARD RENDER
+# CARD RENDER (КЛЮЧЕВОЕ: unsafe_allow_html=True)
 # =============================
 def render_card(row: pd.Series):
     title = safe_text(row.get("name", ""), fallback="Объект")
     obj_id = safe_text(row.get("id", ""), fallback="—")
     obj_type = safe_text(row.get("object_type", ""), fallback="—")
-
     sector = safe_text(row.get("sector", ""), fallback="—")
     district = safe_text(row.get("district", ""), fallback="—")
     address = safe_text(row.get("address", ""), fallback="—")
     responsible = safe_text(row.get("responsible", ""), fallback="—")
-
     status = safe_text(row.get("status", ""), fallback="—")
+
     works = safe_text(row.get("works_in_progress", ""), fallback="—")
     issues = safe_text(row.get("issues", ""), fallback="—")
 
@@ -832,23 +792,20 @@ def render_card(row: pd.Series):
         else '<span class="a-btn disabled">📁 Открыть папку</span>'
     )
 
-    # “красивая” шапка карточки + аккуратные чипы
+    # ВОТ ЗДЕСЬ И БЫЛА ПРИЧИНА: обязательно unsafe_allow_html=True
     st.markdown(
         f"""
 <div class="card">
   <div class="card-inner">
     <div class="card-accent" style="background:{accent};"></div>
 
-    <div class="card-header">
-      <div class="title-wrap">
-        <h3 class="card-title">{title}</h3>
-        <div class="card-subchips">
-          <span class="chip">🆔 {obj_id}</span>
-          <span class="chip chip-muted">🏷️ {sector}</span>
-          <span class="chip chip-muted">📍 {district}</span>
-          <span class="chip chip-muted">🏛️ {obj_type}</span>
-        </div>
-      </div>
+    <h3 class="card-title">{title}</h3>
+
+    <div class="card-subchips">
+      <span class="chip">🆔 {obj_id}</span>
+      <span class="chip chip-muted">🏷️ {sector}</span>
+      <span class="chip chip-muted">📍 {district}</span>
+      <span class="chip chip-muted">🏛️ {obj_type}</span>
     </div>
 
     <div class="card-grid">
@@ -874,11 +831,10 @@ def render_card(row: pd.Series):
         unsafe_allow_html=True,
     )
 
-    # Красивое “нажатие” на раскрытие:
-    # (экспандер уже стилизован CSS выше)
+    # Раскрытие данных — чтобы лента не была “простынёй”
     exp_title = "📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть"
     with st.expander(exp_title, expanded=False):
-        if issues and issues != "—" and issues.strip() != "":
+        if issues and issues != "—" and issues.strip():
             st.markdown(
                 f"""
 <div class="issue-box">
