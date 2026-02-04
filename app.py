@@ -1,7 +1,7 @@
 import base64
 import re
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -78,12 +78,7 @@ def move_prochie_to_bottom(items: list[str]) -> list[str]:
 
 
 def status_class(status_text: str) -> str:
-    """
-    CSS-класс для подсветки статуса:
-    - остановлено/приостановлено -> красный
-    - проектирование -> желтый
-    - строительство -> зеленый
-    """
+    """CSS-класс для подсветки статуса."""
     s = norm_col(status_text)
 
     if "останов" in s or "приостанов" in s:
@@ -95,76 +90,65 @@ def status_class(status_text: str) -> str:
     return "status"
 
 
-def excel_serial_to_date_str(x) -> str | None:
+# ---------- DATE FIX (Google Sheets serial -> dd.mm.yyyy) ----------
+GS_EPOCH = date(1899, 12, 30)  # Google Sheets / Excel serial base
+
+def to_date_str(v) -> str:
     """
-    Google Sheets/Excel иногда отдают дату как число (serial):
-    45902 -> 02.09.2025
-    Возвращает строку dd.mm.yyyy или None если не похоже на дату.
+    Приводим дату к строке ДД.ММ.ГГГГ.
+    Поддерживает:
+    - datetime/date
+    - строки (пытаемся распарсить)
+    - числа (serial Google Sheets: 45652)
     """
-    if x is None:
-        return None
+    if v is None:
+        return "—"
     try:
-        if pd.isna(x):
-            return None
+        if pd.isna(v):
+            return "—"
     except Exception:
         pass
 
-    # уже дата/таймстамп
-    if isinstance(x, (datetime, pd.Timestamp)):
-        return x.strftime("%d.%m.%Y")
+    # datetime/date
+    if isinstance(v, (datetime, date)):
+        try:
+            return pd.to_datetime(v).strftime("%d.%m.%Y")
+        except Exception:
+            return str(v)
 
-    # строка-число / число / float
-    try:
-        s = str(x).strip().replace(",", ".")
-        if s == "":
-            return None
-        v = float(s)
-        # адекватный диапазон serial дат (примерно 1990..2100)
-        if 30000 <= v <= 80000:
-            base = datetime(1899, 12, 30)  # Excel/Sheets base
-            d = base + timedelta(days=int(round(v)))
+    # numeric serial
+    if isinstance(v, (int, float)):
+        # отсекаем совсем “мелкие/мусорные” числа
+        if 20000 <= float(v) <= 90000:
+            d = GS_EPOCH + timedelta(days=int(float(v)))
             return d.strftime("%d.%m.%Y")
-    except Exception:
-        return None
+        # иначе показываем как есть
+        return str(v)
 
-    return None
-
-
-def fmt_date(x) -> str:
-    """Красиво показать дату: если serial — конвертируем; если пусто — '—'."""
-    if x is None:
-        return "—"
-    try:
-        if pd.isna(x):
-            return "—"
-    except Exception:
-        pass
-
-    s = str(x).strip()
+    s = str(v).strip()
     if not s:
         return "—"
 
-    conv = excel_serial_to_date_str(x)
-    return conv if conv else s
-
-
-def fmt_money(x) -> str:
-    """Деньги: 882623791.57 -> 882 623 792 ₽"""
-    if x is None:
-        return "—"
+    # string -> datetime
     try:
-        if pd.isna(x):
-            return "—"
+        dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
+        if pd.notna(dt):
+            return dt.strftime("%d.%m.%Y")
     except Exception:
         pass
-    s = str(x).strip()
-    if not s:
-        return "—"
-    try:
-        v = float(str(x).replace(" ", "").replace("\u00A0", "").replace(",", "."))
-        return f"{v:,.0f}".replace(",", " ") + " ₽"
-    except Exception:
-        return s
+
+    return s
+
+
+def normalize_dates_in_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Автоприведение всех *_date / *date* колонок к нормальному виду (строкой)."""
+    if df.empty:
+        return df
+    for c in df.columns:
+        nc = norm_col(c)
+        if nc.endswith("_date") or nc == "date" or "date" in nc:
+            df[c] = df[c].apply(to_date_str)
+    return df
 
 
 # =============================
@@ -194,7 +178,7 @@ def load_data() -> pd.DataFrame:
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
-            "РЕЕСТР_объектов_Курская_область_2025-2028 (17).xlsx",
+            "РЕЕСТР_объектов_Курская_область_2025-2028 (7).xlsx",
             "registry.xlsx",
             "data.xlsx",
         ]
@@ -202,7 +186,10 @@ def load_data() -> pd.DataFrame:
             p = Path(__file__).parent / name
             if p.exists():
                 try:
-                    df = pd.read_excel(p, sheet_name=0)
+                    # ВАЖНО: если есть лист "РЕЕСТР" — берём его
+                    xls = pd.ExcelFile(p)
+                    sheet = "РЕЕСТР" if "РЕЕСТР" in xls.sheet_names else 0
+                    df = pd.read_excel(p, sheet_name=sheet)
                     break
                 except Exception:
                     pass
@@ -211,134 +198,85 @@ def load_data() -> pd.DataFrame:
         return pd.DataFrame()
 
     df.columns = [str(c).strip() for c in df.columns]
+    df = normalize_dates_in_df(df)
     return df
 
 
 def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Оставляем твою логику (единые поля для фильтра/поиска),
-    но ДОБАВЛЯЕМ все расширенные поля (для карточки).
+    Приводим к вашей фиксированной схеме (англ. колонки).
+    Если каких-то колонок нет — создаём пустые.
     """
     if df.empty:
-        return df
+        return df.copy()
 
-    # базовые поля (как у тебя)
-    col_id = pick_col(df, ["id", "ID"])
-    col_sector = pick_col(df, ["sector", "отрасль"])
-    col_district = pick_col(df, ["district", "район"])
-    col_name = pick_col(df, ["object_name", "наименование_объекта", "наименование объекта"])
-    col_object_type = pick_col(df, ["object_type", "объект", "тип", "тип объекта"])
-    col_resp = pick_col(df, ["responsible", "ответственный"])
-    col_status = pick_col(df, ["status", "статус"])
-    col_works = pick_col(df, ["works_in_progress", "работы_ведутся", "работы ведутся"])
-    col_issues = pick_col(df, ["issues", "проблемные_вопросы", "проблемные вопросы"])
-    col_last_update = pick_col(df, ["last_update", "дата_последнего_обновления", "дата последнего обновления"])
+    # Базовые (A-O и дальше по вашей схеме)
+    mapping = {
+        "id": ["id", "ID"],
+        "sector": ["sector", "Отрасль"],
+        "district": ["district", "Район"],
+        "object_name": ["object_name", "name", "Наименование_объекта", "Наименование объекта"],
+        "object_type": ["object_type", "объект", "Объект", "Тип", "type"],
+        "responsible": ["responsible", "Ответственный"],
+        "status": ["status", "Статус"],
+        "works_in_progress": ["works_in_progress", "Работы_ведутся", "Работы ведутся", "work_flag", "works"],
+        "issues": ["issues", "Проблемные_вопросы", "Проблемные вопросы"],
+        "last_update": ["last_update", "Дата_последнего_обновления", "Дата последнего обновления"],
+        "card_url": ["card_url", "Ссылка_на_карточку_(Google)", "Ссылка на карточку", "Ссылка_на_карточку"],
+        "folder_url": ["folder_url", "Ссылка_на_папку_(Drive)", "Ссылка на папку", "Ссылка_на_папку"],
+        "card_url_text": ["card_url_text"],
+        "folder_url_text": ["folder_url_text"],
+        "address": ["address", "Адрес"],
 
-    col_card = pick_col(df, ["card_url", "ссылка_на_карточку_(google)", "ссылка на карточку"])
-    col_folder = pick_col(df, ["folder_url", "ссылка_на_папку_(drive)", "ссылка на папку"])
-    col_card_text = pick_col(df, ["card_url_text"])
-    col_folder_text = pick_col(df, ["folder_url_text"])
-    col_address = pick_col(df, ["address", "адрес"])
-
-    # расширенные поля (точно по твоей зафиксированной структуре)
-    col_state_program = pick_col(df, ["state_program"])
-    col_federal_project = pick_col(df, ["federal_project"])
-    col_regional_program = pick_col(df, ["regional_program"])
-
-    col_agreement = pick_col(df, ["agreement"])
-    col_agreement_date = pick_col(df, ["agreement_date"])
-    col_agreement_amount = pick_col(df, ["agreement_amount"])
-
-    col_capacity = pick_col(df, ["capacity_seats"])
-    col_area = pick_col(df, ["area_m2"])
-    col_target_deadline = pick_col(df, ["target_deadline"])
-
-    col_design = pick_col(df, ["design"])
-    col_psd_cost = pick_col(df, ["psd_cost"])
-    col_designer = pick_col(df, ["designer"])
-
-    col_expertise = pick_col(df, ["expertise"])
-    col_expertise_conclusion = pick_col(df, ["expertise_conclusion"])
-    col_expertise_date = pick_col(df, ["expertise_date"])
-
-    col_rns = pick_col(df, ["rns"])
-    col_rns_date = pick_col(df, ["rns_date"])
-    col_rns_expiry = pick_col(df, ["rns_expiry"])
-
-    col_contract = pick_col(df, ["contract"])
-    col_contract_date = pick_col(df, ["contract_date"])
-    col_contractor = pick_col(df, ["contractor"])
-    col_contract_price = pick_col(df, ["contract_price"])
-
-    col_end_plan = pick_col(df, ["end_date_plan"])
-    col_end_fact = pick_col(df, ["end_date_fact"])
-
-    col_readiness = pick_col(df, ["readiness"])
-    col_paid = pick_col(df, ["paid"])
-
-    col_updated_at = pick_col(df, ["updated_at"])
+        # Расширение после address (ваша финальная структура)
+        "state_program": ["state_program", "Госпрограмма"],
+        "federal_project": ["federal_project", "Федеральный_проект", "Федеральный проект"],
+        "regional_program": ["regional_program", "Региональная_программа", "Региональная программа"],
+        "agreement": ["agreement", "Соглашение"],
+        "agreement_date": ["agreement_date", "Дата_соглашения", "Дата соглашения"],
+        "agreement_amount": ["agreement_amount", "Сумма_соглашения", "Сумма соглашения"],
+        "capacity_seats": ["capacity_seats", "Мощность (мест)", "Мощность_мест", "capacity"],
+        "area_m2": ["area_m2", "Площадь", "Площадь_м2", "area"],
+        "target_deadline": ["target_deadline", "Срок_достижения результата"],
+        "design": ["design", "Проектирование"],
+        "psd_cost": ["psd_cost", "Стоимость_ПСД", "Стоимость ПСД"],
+        "designer": ["designer", "Проектировщик"],
+        "expertise": ["expertise", "Экспертиза"],
+        "expertise_conclusion": ["expertise_conclusion", "Заключение экспертизы"],
+        "expertise_date": ["expertise_date", "Дата экспертизы"],
+        "rns": ["rns", "РНС"],
+        "rns_date": ["rns_date", "Дата РНС", "rns date", "Дата"],
+        "rns_expiry": ["rns_expiry", "Срок РНС", "rns_expiry"],
+        "contract": ["contract", "Контракт"],
+        "contract_date": ["contract_date", "Дата контракта"],
+        "contractor": ["contractor", "Подрядчик"],
+        "contract_price": ["contract_price", "Цена контракта"],
+        "end_date_plan": ["end_date_plan", "Срок окончания_план"],
+        "end_date_fact": ["end_date_fact", "Срок окончания_факт"],
+        "readiness": ["readiness", "Готовность"],
+        "paid": ["paid", "Оплачено"],
+        "updated_at": ["updated_at", "updated_at", "Обновлено", "updated"],
+    }
 
     out = pd.DataFrame()
 
-    # базовая “витрина” (как у тебя было)
-    out["id"] = df[col_id] if col_id else ""
-    out["sector"] = df[col_sector] if col_sector else ""
-    out["district"] = df[col_district] if col_district else ""
-    out["name"] = df[col_name] if col_name else ""
-    out["object_type"] = df[col_object_type] if col_object_type else ""
-    out["address"] = df[col_address] if col_address else ""
-    out["responsible"] = df[col_resp] if col_resp else ""
-    out["status"] = df[col_status] if col_status else ""
-    out["work_flag"] = df[col_works] if col_works else ""
-    out["issues"] = df[col_issues] if col_issues else ""
-    out["last_update"] = df[col_last_update] if col_last_update else ""
+    # соберём колонки
+    for target, candidates in mapping.items():
+        col = pick_col(df, candidates)
+        if col:
+            out[target] = df[col]
+        else:
+            out[target] = ""
 
-    out["card_url"] = df[col_card] if col_card else ""
-    out["folder_url"] = df[col_folder] if col_folder else ""
-    out["card_url_text"] = df[col_card_text] if col_card_text else ""
-    out["folder_url_text"] = df[col_folder_text] if col_folder_text else ""
-
-    # расширение (для карточки)
-    out["state_program"] = df[col_state_program] if col_state_program else ""
-    out["federal_project"] = df[col_federal_project] if col_federal_project else ""
-    out["regional_program"] = df[col_regional_program] if col_regional_program else ""
-
-    out["agreement"] = df[col_agreement] if col_agreement else ""
-    out["agreement_date"] = df[col_agreement_date] if col_agreement_date else ""
-    out["agreement_amount"] = df[col_agreement_amount] if col_agreement_amount else ""
-
-    out["capacity_seats"] = df[col_capacity] if col_capacity else ""
-    out["area_m2"] = df[col_area] if col_area else ""
-    out["target_deadline"] = df[col_target_deadline] if col_target_deadline else ""
-
-    out["design"] = df[col_design] if col_design else ""
-    out["psd_cost"] = df[col_psd_cost] if col_psd_cost else ""
-    out["designer"] = df[col_designer] if col_designer else ""
-
-    out["expertise"] = df[col_expertise] if col_expertise else ""
-    out["expertise_conclusion"] = df[col_expertise_conclusion] if col_expertise_conclusion else ""
-    out["expertise_date"] = df[col_expertise_date] if col_expertise_date else ""
-
-    out["rns"] = df[col_rns] if col_rns else ""
-    out["rns_date"] = df[col_rns_date] if col_rns_date else ""
-    out["rns_expiry"] = df[col_rns_expiry] if col_rns_expiry else ""
-
-    out["contract"] = df[col_contract] if col_contract else ""
-    out["contract_date"] = df[col_contract_date] if col_contract_date else ""
-    out["contractor"] = df[col_contractor] if col_contractor else ""
-    out["contract_price"] = df[col_contract_price] if col_contract_price else ""
-
-    out["end_date_plan"] = df[col_end_plan] if col_end_plan else ""
-    out["end_date_fact"] = df[col_end_fact] if col_end_fact else ""
-
-    out["readiness"] = df[col_readiness] if col_readiness else ""
-    out["paid"] = df[col_paid] if col_paid else ""
-
-    out["updated_at"] = df[col_updated_at] if col_updated_at else ""
-
-    # чистим nan/None в строки
+    # чистим nan/None
     for c in out.columns:
         out[c] = out[c].astype(str).replace({"nan": "", "None": ""})
+
+    # ещё раз приводим все date-поля (после cast to str тоже бывает)
+    for c in out.columns:
+        nc = norm_col(c)
+        if nc.endswith("_date") or "date" in nc:
+            out[c] = out[c].apply(to_date_str)
 
     return out
 
@@ -346,7 +284,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 # =============================
 # STYLES (ШАПКУ НЕ ТРОГАЕМ — оставляем как есть)
 # =============================
-crest_b64 = read_local_crest_b64()  # can be None
+crest_b64 = read_local_crest_b64()
 
 st.markdown(
     """
@@ -357,7 +295,6 @@ st.markdown(
 
 div[data-testid="stHorizontalBlock"]{ gap: 14px; }
 
-/* Hide Streamlit footer/menu */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
@@ -428,7 +365,7 @@ header {visibility: hidden;}
 }
 
 /* =========================
-   CARDS
+   CARDS (ONLY DESIGN CHANGE)
    ========================= */
 .card{
   background: #ffffff;
@@ -453,6 +390,7 @@ header {visibility: hidden;}
   gap: 8px 18px;
   margin-top: 6px;
 }
+
 .card-item{
   font-size: 14px;
   color: rgba(15, 23, 42, .92);
@@ -485,14 +423,19 @@ header {visibility: hidden;}
 .tag.status-green{
   background: rgba(34, 197, 94, .10);
   border-color: rgba(34, 197, 94, .22);
+  color: rgba(15, 23, 42, .92);
 }
+
 .tag.status-yellow{
   background: rgba(245, 158, 11, .12);
   border-color: rgba(245, 158, 11, .25);
+  color: rgba(15, 23, 42, .92);
 }
+
 .tag.status-red{
   background: rgba(239, 68, 68, .09);
   border-color: rgba(239, 68, 68, .20);
+  color: rgba(15, 23, 42, .92);
 }
 
 .card-actions{
@@ -517,10 +460,12 @@ header {visibility: hidden;}
   font-size: 14px;
   transition: .12s ease-in-out;
 }
+
 .a-btn:hover{
   transform: translateY(-1px);
   box-shadow: 0 10px 18px rgba(0,0,0,.08);
 }
+
 .a-btn.disabled{
   opacity: .45;
   pointer-events: none;
@@ -531,10 +476,9 @@ header {visibility: hidden;}
   padding-top: 12px;
   border-top: 1px dashed rgba(15, 23, 42, .14);
   font-size: 13px;
-  color: rgba(15, 23, 42, .78);
+  color: rgba(15, 23, 42, .70);
 }
 
-/* Mobile */
 @media (max-width: 900px){
   .card-grid{ grid-template-columns: 1fr; }
   .card-title{ font-size: 18px; }
@@ -618,7 +562,7 @@ if raw.empty:
 
 df = normalize_schema(raw)
 
-# unique lists
+# фильтры по вашим полям
 sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
 districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()])
 statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
@@ -631,7 +575,7 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS (unchanged logic)
+# FILTERS
 # =============================
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -653,11 +597,10 @@ if status_sel != "Все":
     filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
 
 if q:
-
     def row_match(r):
         s = " ".join(
             [
-                str(r.get("name", "")),
+                str(r.get("object_name", "")),
                 str(r.get("address", "")),
                 str(r.get("responsible", "")),
                 str(r.get("id", "")),
@@ -672,59 +615,22 @@ st.divider()
 
 
 # =============================
-# CARD RENDER (расширили, но НЕ ломаем)
+# CARD RENDER (ваш стиль + аккуратно добавили доп.поля)
 # =============================
 def render_card(row: pd.Series):
-    title = safe_text(row.get("name", ""), fallback="Объект")
+    title = safe_text(row.get("object_name", ""), fallback="Объект")
     sector = safe_text(row.get("sector", ""), fallback="—")
     district = safe_text(row.get("district", ""), fallback="—")
     address = safe_text(row.get("address", ""), fallback="—")
     responsible = safe_text(row.get("responsible", ""), fallback="—")
 
     status = safe_text(row.get("status", ""), fallback="—")
-    work_flag = safe_text(row.get("work_flag", ""), fallback="—")
+    work_flag = safe_text(row.get("works_in_progress", ""), fallback="—")
+    last_update = safe_text(row.get("last_update", ""), fallback="—")
     issues = safe_text(row.get("issues", ""), fallback="—")
 
     card_url = safe_text(row.get("card_url", ""), fallback="")
     folder_url = safe_text(row.get("folder_url", ""), fallback="")
-
-    # расширенные (с форматированием)
-    state_program = safe_text(row.get("state_program", ""))
-    federal_project = safe_text(row.get("federal_project", ""))
-    regional_program = safe_text(row.get("regional_program", ""))
-
-    agreement = safe_text(row.get("agreement", ""))
-    agreement_date = fmt_date(row.get("agreement_date", ""))
-    agreement_amount = fmt_money(row.get("agreement_amount", ""))
-
-    capacity = safe_text(row.get("capacity_seats", ""))
-    area = safe_text(row.get("area_m2", ""))
-    target_deadline = fmt_date(row.get("target_deadline", ""))
-
-    design = safe_text(row.get("design", ""))
-    psd_cost = fmt_money(row.get("psd_cost", ""))
-    designer = safe_text(row.get("designer", ""))
-
-    expertise = safe_text(row.get("expertise", ""))
-    expertise_conclusion = safe_text(row.get("expertise_conclusion", ""))
-    expertise_date = fmt_date(row.get("expertise_date", ""))
-
-    rns = safe_text(row.get("rns", ""))
-    rns_date = fmt_date(row.get("rns_date", ""))
-    rns_expiry = fmt_date(row.get("rns_expiry", ""))
-
-    contract = safe_text(row.get("contract", ""))
-    contract_date = fmt_date(row.get("contract_date", ""))
-    contractor = safe_text(row.get("contractor", ""))
-    contract_price = fmt_money(row.get("contract_price", ""))
-
-    end_plan = fmt_date(row.get("end_date_plan", ""))
-    end_fact = fmt_date(row.get("end_date_fact", ""))
-
-    readiness = safe_text(row.get("readiness", ""))
-    paid = fmt_money(row.get("paid", ""))
-
-    updated_at = fmt_date(row.get("updated_at", ""))
 
     btn_card = (
         f'<a class="a-btn" href="{card_url}" target="_blank">📄 Открыть карточку</a>'
@@ -737,77 +643,47 @@ def render_card(row: pd.Series):
         else '<span class="a-btn disabled">📁 Открыть папку</span>'
     )
 
-    # показываем блоки только если есть смысл (чтобы было лаконично)
-    def has_any(*vals) -> bool:
-        return any(v not in ("", "—", None) for v in vals)
+    # доп поля (покажем только если есть значения)
+    extra_pairs = [
+        ("Госпрограмма", row.get("state_program", "")),
+        ("Фед. проект", row.get("federal_project", "")),
+        ("Рег. программа", row.get("regional_program", "")),
+        ("Соглашение", row.get("agreement", "")),
+        ("Дата соглаш.", row.get("agreement_date", "")),
+        ("Сумма соглаш.", row.get("agreement_amount", "")),
+        ("Мощность (мест)", row.get("capacity_seats", "")),
+        ("Площадь (м²)", row.get("area_m2", "")),
+        ("Срок достижения", row.get("target_deadline", "")),
+        ("Проектирование", row.get("design", "")),
+        ("Стоимость ПСД", row.get("psd_cost", "")),
+        ("Проектировщик", row.get("designer", "")),
+        ("Экспертиза", row.get("expertise", "")),
+        ("Заключение экспертизы", row.get("expertise_conclusion", "")),
+        ("Дата экспертизы", row.get("expertise_date", "")),
+        ("РНС", row.get("rns", "")),
+        ("Дата РНС", row.get("rns_date", "")),
+        ("РНС (срок/оконч.)", row.get("rns_expiry", "")),
+        ("Контракт", row.get("contract", "")),
+        ("Дата контракта", row.get("contract_date", "")),
+        ("Подрядчик", row.get("contractor", "")),
+        ("Цена контракта", row.get("contract_price", "")),
+        ("Окончание (план)", row.get("end_date_plan", "")),
+        ("Окончание (факт)", row.get("end_date_fact", "")),
+        ("Готовность", row.get("readiness", "")),
+        ("Оплачено", row.get("paid", "")),
+        ("updated_at", row.get("updated_at", "")),
+    ]
+    extra_lines = []
+    for k, v in extra_pairs:
+        vv = safe_text(v, fallback="")
+        if vv and vv != "—":
+            extra_lines.append(f"• <b>{k}:</b> {vv}")
 
-    program_block = ""
-    if has_any(state_program, federal_project, regional_program):
-        program_block = f"""
-        <div class="card-extra">
-          <b>Программы:</b><br/>
-          {("• Госпрограмма: " + state_program + "<br/>") if state_program != "—" else ""}
-          {("• Федпроект: " + federal_project + "<br/>") if federal_project != "—" else ""}
-          {("• Регпрограмма: " + regional_program) if regional_program != "—" else ""}
-        </div>
-        """
-
-    docs_block = ""
-    if has_any(agreement, agreement_date, agreement_amount, rns, rns_date, rns_expiry, expertise, expertise_date):
-        docs_block = f"""
-        <div class="card-extra">
-          <b>Документы / этапы:</b><br/>
-          {("• Соглашение: " + agreement + "<br/>") if agreement != "—" else ""}
-          {("• Дата соглашения: " + agreement_date + "<br/>") if agreement_date != "—" else ""}
-          {("• Сумма соглашения: " + agreement_amount + "<br/>") if agreement_amount != "—" else ""}
-
-          {("• Экспертиза: " + expertise + "<br/>") if expertise != "—" else ""}
-          {("• Заключение: " + expertise_conclusion + "<br/>") if expertise_conclusion != "—" else ""}
-          {("• Дата экспертизы: " + expertise_date + "<br/>") if expertise_date != "—" else ""}
-
-          {("• РНС: " + rns + "<br/>") if rns != "—" else ""}
-          {("• Дата РНС: " + rns_date + "<br/>") if rns_date != "—" else ""}
-          {("• РНС до: " + rns_expiry) if rns_expiry != "—" else ""}
-        </div>
-        """
-
-    contract_block = ""
-    if has_any(contract, contract_date, contractor, contract_price, end_plan, end_fact, paid, readiness):
-        contract_block = f"""
-        <div class="card-extra">
-          <b>Контракт / сроки / финансы:</b><br/>
-          {("• Контракт: " + contract + "<br/>") if contract != "—" else ""}
-          {("• Дата контракта: " + contract_date + "<br/>") if contract_date != "—" else ""}
-          {("• Подрядчик: " + contractor + "<br/>") if contractor != "—" else ""}
-          {("• Цена контракта: " + contract_price + "<br/>") if contract_price != "—" else ""}
-          {("• Срок окончания (план): " + end_plan + "<br/>") if end_plan != "—" else ""}
-          {("• Срок окончания (факт): " + end_fact + "<br/>") if end_fact != "—" else ""}
-          {("• Готовность: " + readiness + "<br/>") if readiness != "—" else ""}
-          {("• Оплачено: " + paid) if paid != "—" else ""}
-        </div>
-        """
-
-    design_block = ""
-    if has_any(design, psd_cost, designer, capacity, area, target_deadline):
-        design_block = f"""
-        <div class="card-extra">
-          <b>Паспорт:</b><br/>
-          {("• Мощность: " + capacity + "<br/>") if capacity != "—" else ""}
-          {("• Площадь: " + area + "<br/>") if area != "—" else ""}
-          {("• Срок достижения результата: " + target_deadline + "<br/>") if target_deadline != "—" else ""}
-          {("• Проектирование: " + design + "<br/>") if design != "—" else ""}
-          {("• Стоимость ПСД: " + psd_cost + "<br/>") if psd_cost != "—" else ""}
-          {("• Проектировщик: " + designer) if designer != "—" else ""}
-        </div>
-        """
-
-    issues_block = ""
-    if issues not in ("—", "", None):
-        issues_block = f"""
-        <div class="card-extra">
-          <b>Проблемные вопросы:</b><br/>{issues}
-        </div>
-        """
+    extra_html = ""
+    if extra_lines:
+        extra_html = "<br/>".join(extra_lines)
+    else:
+        extra_html = "—"
 
     st.markdown(
         f"""
@@ -824,7 +700,7 @@ def render_card(row: pd.Series):
   <div class="card-tags">
     <span class="tag {status_class(status)}">📌 <b>Статус:</b> {status}</span>
     <span class="tag">🛠️ <b>Работы:</b> {work_flag}</span>
-    <span class="tag">🗓️ <b>Обновлено:</b> {updated_at}</span>
+    <span class="tag">🗓️ <b>Обновлено:</b> {last_update}</span>
   </div>
 
   <div class="card-actions">
@@ -832,19 +708,16 @@ def render_card(row: pd.Series):
     {btn_folder}
   </div>
 
-  {program_block}
-  {design_block}
-  {docs_block}
-  {contract_block}
-  {issues_block}
+  <div class="card-extra">
+    <b>Проблемные вопросы:</b> {issues}<br/><br/>
+    <b>Паспорт/финансы/сроки (из реестра):</b><br/>
+    {extra_html}
+  </div>
 </div>
 """,
-        unsafe_allow_html=True,  # КРИТИЧНО: иначе будут видны теги как текст
+        unsafe_allow_html=True,
     )
 
 
-# =============================
-# OUTPUT: ONE COLUMN
-# =============================
 for _, r in filtered.iterrows():
     render_card(r)
