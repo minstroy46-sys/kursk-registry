@@ -1,817 +1,916 @@
-import React, { useState, useEffect } from 'react';
+import base64
+import re
+from datetime import datetime, date
+from pathlib import Path
 
-// Mock data structure matching the normalized schema from the provided registry
-const mockData = [
-  {
-    id: "ZDR-001",
-    sector: "Здравоохранение",
-    district: "Курск",
-    name: "«Многопрофильная областная детская клиническая больница 3 уровня в г. Курске»",
-    object_type: "ОДКБ 3 ур., Курск",
-    address: "г. Курск, проспект Надежды Плевицкой",
-    responsible: "Бороздина Е.Н.",
-    status: "ведется строительство",
-    work_flag: "Да",
-    issues: "В настоящее время контракт находится в стадии расторжения. На текущую дату завершена выверка объемов выполненных работ в плотном взаимодействии с представителями РосСтройКонтроль, акты по выполненным объемам работ подписаны ОКУ «УКС Курской области», представителем РосСтройКонтроль и подрядной организацией, ведется определение стоимости выполненных работ",
-    updated_at: "2026-02-04",
-    card_url: "https://docs.google.com/spreadsheets/d/1FPhqCrtgBcWKTV4sxdeklxjT-pegM-TKW7XTwIL3elM/edit?gid=1589732326#gid=1589732326",
-    card_url_text: "Многопрофильная областная детская клиническая больница 3 уровня, г. Курске",
-    state_program: "ГП РФ \"Развитие здравоохранения\"",
-    federal_project: "ФП \"Развитие инфраструктуры здравоохранения\"",
-    regional_program: "РП \"Развитие здравоохранения в Курской области\"",
-    agreement: "№ 056-09-2026-1794 от 30.12.2025 года с Министерством здравоохранения РФ",
-    agreement_date: "2025-12-30",
-    agreement_amount: "4034974836",
-    capacity_seats: "320 коек",
-    area_m2: "64595,23 м2",
-    target_deadline: "2031-01-01",
-    design: "да",
-    psd_cost: "54192700",
-    designer: "АО \"Строительный холдинг \"Тезис\"",
-    expertise: "да",
-    expertise_conclusion: "№ 46-1-1-3-008788-2025 от 20.02.2025 года выдано ФАУ \"Главгосэкспертиза\"",
-    expertise_date: "2025-02-20",
-    rns: "№ 46-29-448-2025 от 01.07.2025 выдано Комитет архитектуры и градостроительства города Курска",
-    rns_date: "2025-07-01",
-    rns_expiry: "2027-12-31",
-    contract: "ГК №73 от 29.03.2022 на проектирование, строительство и ввод в эксплуатацию",
-    contract_date: "2022-03-29",
-    contractor: "АО \"Строительный холдинг \"Тезис\"",
-    contract_price: "8293070613.86",
-    end_date_plan: "2027-12-31",
-    end_date_fact: "2027-12-31",
-    readiness: "0.38",
-    paid: "",
-    folder_url: "https://drive.google.com/drive/folders/1IBdbDEQ07L2FKG-5YupjPKoc_n6JyMbf"
-  },
-  {
-    id: "OBR-003",
-    sector: "Образование",
-    district: "Курский",
-    name: "Новопоселеновская средняя общеобразовательная школа на 500 мест",
-    object_type: "СОШ 500, 1-е Цветово",
-    address: "Курская область, Курский район, д. 1-е Цветово",
-    responsible: "Гуляева А.С.",
-    status: "строительство остановлено",
-    work_flag: "Нет",
-    issues: "1) Работы на объекте не ведутся. 2) Не обеспечено финансирование оснащения, контракт не заключен.",
-    updated_at: "2026-02-05",
-    card_url: "https://docs.google.com/spreadsheets/d/1IF2RVNmqXQCOrSGgvFuylsJ6adiHcL1ZU28AL6wIQko/edit?gid=1589732326#gid=1589732326",
-    card_url_text: "Новопоселеновская средняя общеобразовательная школа на 500 мест, Курский район",
-    state_program: "ГП РФ \"Развитие образования\"",
-    federal_project: "ФП \"Все лучшее детям\"",
-    regional_program: "РП \"Развитие образования в Курской области\"",
-    agreement: "№ 073-09-2025-457 от 26.12.2024 с Министерством просвещения РФ",
-    agreement_date: "2024-12-26",
-    agreement_amount: "868743600",
-    capacity_seats: "500 посещений",
-    area_m2: "15 460,17 м2.",
-    target_deadline: "2027-12-31",
-    design: "да",
-    psd_cost: "6427420",
-    designer: "ОБУ «КУРСКГРАЖДАНПРОЕКТ»",
-    expertise: "да",
-    expertise_conclusion: "№46-1-1-3-024002-2023 от 05.05.2023, выданное АУ КО \"Государственная экспертиза проектов Курской области\"",
-    expertise_date: "2023-05-05",
-    rns: "№ 46-11-131-2025 от 18.09.2025, выдано Министерство архитектуры и градостроительства Курской области",
-    rns_date: "2025-09-18",
-    rns_expiry: "2027-04-18",
-    contract: "МК от 02.09.2025 № 14",
-    contract_date: "2025-09-02",
-    contractor: "АО «УКС инженерных коммуникаций, сооружений и дорог»",
-    contract_price: "882623791.57",
-    end_date_plan: "2027-04-01",
-    end_date_fact: "2027-12-31",
-    readiness: "0",
-    paid: "",
-    folder_url: "https://drive.google.com/drive/folders/1F3nxZv3lws3CnI2W5NpRjCXSYT3aJAxD"
-  },
-  {
-    id: "KUL-003",
-    sector: "Культура",
-    district: "Курск",
-    name: "Экспозиционный корпус Курского областного краеведческого музея",
-    object_type: "Краеведческий музей, Курск",
-    address: "г. Курск, ул. Луначарского, 8, здание литер В",
-    responsible: "Сафонова Л.А.",
-    status: "ведется строительство",
-    work_flag: "Да",
-    issues: "1) Работы на объекте не ведутся. 2) Не обеспечено финансирование оснащения, контракт не заключен.",
-    updated_at: "2026-02-04",
-    card_url: "https://docs.google.com/spreadsheets/d/1cQ0eeBEeGTF_j1iYzr8MIoYiDQxctgbeOGw1S_OMItA/edit?gid=1589732326#gid=1589732326",
-    card_url_text: "Экспозиционный корпус Курского областного краеведческого музея, г. Курск",
-    state_program: "ГП РФ \"Развитие культуры\"",
-    federal_project: "ФП \"Развитие инфраструктуры в сфере культуры\"",
-    regional_program: "создание и (или) модернизация инфраструктуры в сфере культуры региональной (муниципальной) собственности",
-    agreement: "№ 054-09-2026-544 от 26.12.2025",
-    agreement_date: "2025-12-26",
-    agreement_amount: "1458369000",
-    capacity_seats: "600 посещений",
-    area_m2: "8619 м2.",
-    target_deadline: "2027-12-31",
-    design: "да",
-    psd_cost: "6427420",
-    designer: "ООО \"ВЕК\"",
-    expertise: "да",
-    expertise_conclusion: "№46-1-1-2-083067-2024 от 30.12.2024",
-    expertise_date: "2024-12-30",
-    rns: "№ 46-RU46302000-1-2022 от 18.04.2022",
-    rns_date: "2022-04-18",
-    rns_expiry: "2027-12-31",
-    contract: "МК от 02.09.2025 № 14",
-    contract_date: "2025-09-02",
-    contractor: "АО «УКС инженерных коммуникаций, сооружений и дорог»",
-    contract_price: "882623791.57",
-    end_date_plan: "2027-04-01",
-    end_date_fact: "2027-12-31",
-    readiness: "0",
-    paid: "",
-    folder_url: "https://drive.google.com/drive/folders/1LovfdlAUDU-u75G9VAXZWLTdvXwD_9_p"
+import pandas as pd
+import streamlit as st
+
+
+# =============================
+# CONFIG
+# =============================
+st.set_page_config(page_title="Реестр объектов", layout="wide")
+
+
+# =============================
+# HELPERS
+# =============================
+def safe_text(v, fallback="—") -> str:
+    if v is None:
+        return fallback
+    try:
+        if pd.isna(v):
+            return fallback
+    except Exception:
+        pass
+    s = str(v).strip()
+    if s.lower() in ("nan", "none", "null", ""):
+        return fallback
+    return s
+
+
+def norm_col(s: str) -> str:
+    if s is None:
+        return ""
+    s = str(s).strip().lower().replace("ё", "е")
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    cols = {norm_col(c): c for c in df.columns}
+    # 1) точное совпадение по нормализованному
+    for cand in candidates:
+        nc = norm_col(cand)
+        if nc in cols:
+            return cols[nc]
+    # 2) частичное совпадение
+    for cand in candidates:
+        nc = norm_col(cand)
+        if not nc:
+            continue
+        for c in df.columns:
+            if nc in norm_col(c):
+                return c
+    return None
+
+
+def read_local_crest_b64() -> str | None:
+    p = Path(__file__).parent / "assets" / "gerb.png"
+    if not p.exists():
+        return None
+    return base64.b64encode(p.read_bytes()).decode("utf-8")
+
+
+def move_prochie_to_bottom(items: list[str]) -> list[str]:
+    if not items:
+        return items
+
+    def is_prochie(x: str) -> bool:
+        nx = norm_col(x)
+        return nx in ("прочие", "прочее")
+
+    prochie = [x for x in items if is_prochie(x)]
+    rest = [x for x in items if not is_prochie(x)]
+    return rest + prochie
+
+
+def status_accent(status_text: str) -> str:
+    s = norm_col(status_text)
+    if "останов" in s or "приостанов" in s:
+        return "red"
+    if "проектир" in s:
+        return "yellow"
+    if "строитель" in s:
+        return "green"
+    return "blue"
+
+
+def works_color(work_flag: str) -> str:
+    s = norm_col(work_flag)
+    if s in ("—", "", "нет", "не ведутся", "не ведутся.", "не ведутся.."):
+        return "red"
+    if "не вед" in s or "не выполня" in s or "отсутств" in s:
+        return "red"
+    if s == "да" or "ведут" in s or "выполня" in s or "идут" in s:
+        return "green"
+    return "gray"
+
+
+def try_parse_date(v) -> date | None:
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(v, date) and not isinstance(v, datetime):
+        return v
+    if isinstance(v, datetime):
+        return v.date()
+
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "none", "null", "—"):
+        return None
+
+    # serial date (Google/Excel)
+    if re.fullmatch(r"\d+(\.\d+)?", s):
+        try:
+            num = float(s)
+            dt = pd.to_datetime(num, unit="D", origin="1899-12-30", errors="coerce")
+            if pd.isna(dt):
+                return None
+            return dt.date()
+        except Exception:
+            return None
+
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except Exception:
+            pass
+
+    try:
+        dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+        if pd.isna(dt):
+            return None
+        return dt.date()
+    except Exception:
+        return None
+
+
+def update_color(updated_at_value) -> tuple[str, str]:
+    d = try_parse_date(updated_at_value)
+    if not d:
+        return "gray", "—"
+    days = (date.today() - d).days
+    if days <= 7:
+        return "green", d.strftime("%d.%m.%Y")
+    if days <= 14:
+        return "yellow", d.strftime("%d.%m.%Y")
+    return "red", d.strftime("%d.%m.%Y")
+
+
+def money_fmt(v) -> str:
+    s = safe_text(v, fallback="—")
+    if s == "—":
+        return s
+    try:
+        x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
+        x = float(x)
+        return f"{x:,.2f}".replace(",", " ").replace(".00", "") + " ₽"
+    except Exception:
+        return s if ("₽" in s or "руб" in s.lower()) else f"{s} ₽"
+
+
+def date_fmt(v) -> str:
+    d = try_parse_date(v)
+    return d.strftime("%d.%m.%Y") if d else "—"
+
+
+def ensure_url(s: str) -> str:
+    """Оставляем только рабочие http(s) URL. Иначе возвращаем пустую строку."""
+    x = safe_text(s, fallback="")
+    if not x or x == "—":
+        return ""
+    x = x.strip()
+    if re.match(r"^https?://", x, flags=re.I):
+        return x
+    return ""
+
+
+# =============================
+# DATA LOADING
+# =============================
+@st.cache_data(show_spinner=False)
+def load_data() -> pd.DataFrame:
+    csv_url = None
+    try:
+        csv_url = st.secrets.get("CSV_URL", None)
+    except Exception:
+        csv_url = None
+
+    df = pd.DataFrame()
+
+    if csv_url:
+        try:
+            df = pd.read_csv(csv_url)
+        except Exception:
+            try:
+                df = pd.read_csv(csv_url, sep=";")
+            except Exception:
+                df = pd.DataFrame()
+
+    # fallback local xlsx
+    if df.empty:
+        candidates = [
+            "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
+            "РЕЕСТР_объектов_Курская_область_2025-2028 (18).xlsx",
+            "registry.xlsx",
+            "data.xlsx",
+        ]
+        for name in candidates:
+            p = Path(__file__).parent / name
+            if p.exists():
+                try:
+                    df = pd.read_excel(p, sheet_name=0)
+                    break
+                except Exception:
+                    pass
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Минимальная единая схема для карточек:
+    id, sector, district, name, object_type, address, responsible, status,
+    work_flag, issues, updated_at, card_url_text
+    + паспортные поля (как у вас было).
+    """
+    if df.empty:
+        return df
+
+    def col(*cands):
+        return pick_col(df, list(cands))
+
+    out = pd.DataFrame()
+
+    # БАЗОВЫЕ
+    out["id"] = df[col("id", "ID")] if col("id", "ID") else ""
+    out["sector"] = df[col("sector", "отрасль")] if col("sector", "отрасль") else ""
+    out["district"] = df[col("district", "район")] if col("district", "район") else ""
+    out["name"] = df[col("name", "object_name", "наименование_объекта", "наименование объекта", "объект")] if col(
+        "name", "object_name", "наименование_объекта", "наименование объекта", "объект"
+    ) else ""
+    out["object_type"] = df[col("object_type", "тип", "вид объекта")] if col("object_type", "тип", "вид объекта") else ""
+    out["address"] = df[col("address", "адрес")] if col("address", "адрес") else ""
+    out["responsible"] = df[col("responsible", "ответственный")] if col("responsible", "ответственный") else ""
+    out["status"] = df[col("status", "статус")] if col("status", "статус") else ""
+    out["work_flag"] = df[col("work_flag", "работы", "works_in_progress", "works")] if col(
+        "work_flag", "работы", "works_in_progress", "works"
+    ) else ""
+    out["issues"] = df[col("issues", "проблемы", "проблемные вопросы")] if col(
+        "issues", "проблемы", "проблемные вопросы"
+    ) else ""
+    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
+        "updated_at", "last_update", "обновлено", "updated"
+    ) else ""
+
+    # ВАЖНО: URL КАРТОЧКИ — ИЗ card_url_text (в вашем реестре там ссылка)
+    out["card_url_text"] = df[col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")] if col(
+        "card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку"
+    ) else ""
+
+    # ПАСПОРТНЫЕ ПОЛЯ
+    out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
+        "state_program", "гп", "государственная программа"
+    ) else ""
+    out["federal_project"] = df[col("federal_project", "фп", "федеральный проект")] if col(
+        "federal_project", "фп", "федеральный проект"
+    ) else ""
+    out["regional_program"] = df[col("regional_program", "рп", "региональная программа")] if col(
+        "regional_program", "рп", "региональная программа"
+    ) else ""
+
+    out["agreement"] = df[col("agreement", "соглашение", "номер соглашения")] if col(
+        "agreement", "соглашение", "номер соглашения"
+    ) else ""
+    out["agreement_date"] = df[col("agreement_date", "дата соглашения")] if col(
+        "agreement_date", "дата соглашения"
+    ) else ""
+    out["agreement_amount"] = df[col("agreement_amount", "сумма соглашения")] if col(
+        "agreement_amount", "сумма соглашения"
+    ) else ""
+
+    out["capacity_seats"] = df[col("capacity_seats", "мощность", "мест", "посещений")] if col(
+        "capacity_seats", "мощность", "мест", "посещений"
+    ) else ""
+    out["area_m2"] = df[col("area_m2", "площадь", "м2", "кв.м")] if col(
+        "area_m2", "площадь", "м2", "кв.м"
+    ) else ""
+    out["target_deadline"] = df[col("target_deadline", "целевой срок")] if col(
+        "target_deadline", "целевой срок"
+    ) else ""
+
+    out["design"] = df[col("design", "проектирование", "псд")] if col("design", "проектирование", "псд") else ""
+    out["psd_cost"] = df[col("psd_cost", "стоимость псд")] if col("psd_cost", "стоимость псд") else ""
+    out["designer"] = df[col("designer", "проектировщик")] if col("designer", "проектировщик") else ""
+
+    out["expertise"] = df[col("expertise", "экспертиза")] if col("expertise", "экспертиза") else ""
+    out["expertise_conclusion"] = df[col("expertise_conclusion", "заключение экспертизы")] if col(
+        "expertise_conclusion", "заключение экспертизы"
+    ) else ""
+    out["expertise_date"] = df[col("expertise_date", "дата экспертизы")] if col(
+        "expertise_date", "дата экспертизы"
+    ) else ""
+
+    out["rns"] = df[col("rns", "рнс")] if col("rns", "рнс") else ""
+    out["rns_date"] = df[col("rns_date", "дата рнс")] if col("rns_date", "дата рнс") else ""
+    out["rns_expiry"] = df[col("rns_expiry", "срок действия рнс")] if col("rns_expiry", "срок действия рнс") else ""
+
+    out["contract"] = df[col("contract", "контракт", "номер контракта")] if col(
+        "contract", "контракт", "номер контракта"
+    ) else ""
+    out["contract_date"] = df[col("contract_date", "дата контракта")] if col(
+        "contract_date", "дата контракта"
+    ) else ""
+    out["contractor"] = df[col("contractor", "подрядчик")] if col("contractor", "подрядчик") else ""
+    out["contract_price"] = df[col("contract_price", "цена контракта", "стоимость контракта")] if col(
+        "contract_price", "цена контракта", "стоимость контракта"
+    ) else ""
+
+    out["end_date_plan"] = df[col("end_date_plan", "окончание план")] if col("end_date_plan", "окончание план") else ""
+    out["end_date_fact"] = df[col("end_date_fact", "окончание факт")] if col("end_date_fact", "окончание факт") else ""
+    out["readiness"] = df[col("readiness", "готовность")] if col("readiness", "готовность") else ""
+    out["paid"] = df[col("paid", "оплачено")] if col("paid", "оплачено") else ""
+
+    # чистка
+    for c in out.columns:
+        out[c] = out[c].astype(str).replace({"nan": "", "None": "", "null": ""})
+
+    return out
+
+
+# =============================
+# STYLES
+# =============================
+crest_b64 = read_local_crest_b64()
+
+st.markdown(
+    """
+<style>
+:root{
+  --bg: #f7f8fb;
+  --card: #ffffff;
+  --card2: rgba(15,23,42,.03);
+  --text: #0f172a;
+  --muted: rgba(15,23,42,.72);
+  --border: rgba(15,23,42,.10);
+  --shadow: rgba(0,0,0,.06);
+  --chip-bg: rgba(15,23,42,.05);
+  --chip-bd: rgba(15,23,42,.10);
+  --btn-bg: rgba(255,255,255,.95);
+  --btn-bd: rgba(15,23,42,.12);
+  --hr: rgba(15,23,42,.12);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg: #0b1220;
+    --card: #111a2b;
+    --card2: rgba(255,255,255,.04);
+    --text: rgba(255,255,255,.92);
+    --muted: rgba(255,255,255,.70);
+    --border: rgba(255,255,255,.12);
+    --shadow: rgba(0,0,0,.35);
+    --chip-bg: rgba(255,255,255,.06);
+    --chip-bd: rgba(255,255,255,.12);
+    --btn-bg: rgba(17,26,43,.90);
+    --btn-bd: rgba(255,255,255,.14);
+    --hr: rgba(255,255,255,.14);
   }
-];
+}
+.block-container { padding-top: 24px !important; max-width: 1200px; }
+@media (max-width: 1200px){ .block-container { max-width: 96vw; } }
+div[data-testid="stHorizontalBlock"]{ gap: 14px; }
 
-// Helper functions ported from Python to JavaScript
-const safeText = (v, fallback = "—") => {
-  if (v === null || v === undefined) return fallback;
-  if (typeof v === 'number' && isNaN(v)) return fallback;
-  
-  let s = String(v).trim();
-  if (s.toLowerCase() === "nan" || s.toLowerCase() === "none" || 
-      s.toLowerCase() === "null" || s === "") {
-    return fallback;
-  }
-  return s;
-};
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
 
-const normCol = (s) => {
-  if (s === null || s === undefined) return "";
-  s = String(s).trim().toLowerCase().replace(/ё/g, "е");
-  return s.replace(/\s+/g, " ");
-};
+html, body, [data-testid="stAppViewContainer"]{
+  background: var(--bg) !important;
+}
 
-const statusAccent = (statusText) => {
-  const s = normCol(statusText);
-  if (s.includes("останов") || s.includes("приостанов")) return "red";
-  if (s.includes("проектир")) return "yellow";
-  if (s.includes("строитель")) return "green";
-  return "blue";
-};
+/* HERO */
+.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 14px; }
+.hero{
+  width: 100%;
+  border-radius: 18px;
+  padding: 18px 18px;
+  background: radial-gradient(1200px 380px at 22% 30%, rgba(60,130,255,.22), rgba(0,0,0,0) 55%),
+              linear-gradient(135deg, #0b2a57, #1b4c8f);
+  box-shadow: 0 18px 34px rgba(0,0,0,.18);
+  position: relative;
+  overflow: hidden;
+}
+.hero:after{
+  content:"";
+  position:absolute;
+  inset:-40px -120px auto auto;
+  width: 520px; height: 320px;
+  background: rgba(255,255,255,.08);
+  transform: rotate(14deg);
+  border-radius: 32px;
+}
+.hero-row{
+  display:flex;
+  align-items:flex-start;
+  gap: 16px;
+  position: relative;
+  z-index: 2;
+}
+.hero-crest{
+  width: 74px; height: 74px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.10);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border: 1px solid rgba(255,255,255,.16);
+  flex: 0 0 auto;
+}
+.hero-crest img{
+  width: 56px; height: 56px; object-fit: contain;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+}
+.hero-titles{ flex: 1 1 auto; min-width: 0; }
+.hero-ministry{
+  color: rgba(255,255,255,.95);
+  font-weight: 900;
+  font-size: 20px;
+  line-height: 1.15;
+}
+.hero-app{
+  margin-top: 6px;
+  color: rgba(255,255,255,.92);
+  font-weight: 800;
+  font-size: 16px;
+}
+.hero-sub{
+  margin-top: 6px;
+  color: rgba(255,255,255,.78);
+  font-size: 13px;
+}
+@media (max-width: 900px){
+  .hero-ministry{ font-size: 16px; }
+  .hero-row{ align-items:center; }
+}
 
-const worksColor = (workFlag) => {
-  const s = normCol(workFlag);
-  const negativeTerms = ["—", "", "нет", "не ведутся", "не выполня", "отсутств"];
-  if (negativeTerms.some(term => s.includes(term)) || s === "не ведутся." || s === "не ведутся..") {
-    return "red";
-  }
-  const positiveTerms = ["да", "ведут", "выполня", "идут"];
-  if (positiveTerms.some(term => s.includes(term))) {
-    return "green";
-  }
-  return "gray";
-};
+/* CARD */
+.card{
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 10px 22px var(--shadow);
+  margin-bottom: 14px;
+  position: relative;
+}
+.card[data-accent="green"]{
+  border-color: rgba(34,197,94,.45);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(34,197,94,.18),
+    inset 7px 0 0 rgba(34,197,94,.65);
+}
+.card[data-accent="yellow"]{
+  border-color: rgba(245,158,11,.45);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(245,158,11,.18),
+    inset 7px 0 0 rgba(245,158,11,.65);
+}
+.card[data-accent="red"]{
+  border-color: rgba(239,68,68,.45);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(239,68,68,.18),
+    inset 7px 0 0 rgba(239,68,68,.65);
+}
+.card[data-accent="blue"]{
+  border-color: rgba(59,130,246,.40);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(59,130,246,.16),
+    inset 7px 0 0 rgba(59,130,246,.55);
+}
 
-const tryParseDate = (v) => {
-  if (v === null || v === undefined) return null;
-  
-  // Handle Date objects
-  if (v instanceof Date && !isNaN(v)) {
-    return v;
-  }
-  
-  // Handle strings
-  let s = String(v).trim();
-  if (!s || ["nan", "none", "null", "—"].includes(s.toLowerCase())) {
-    return null;
-  }
-  
-  // Handle Excel serial dates (numbers)
-  if (/^\d+(\.\d+)?$/.test(s)) {
-    try {
-      const num = parseFloat(s);
-      // Excel serial date: days since 1899-12-30
-      const date = new Date("1899-12-30");
-      date.setDate(date.getDate() + num);
-      if (!isNaN(date)) return date;
-    } catch (e) {
-      return null;
-    }
-  }
-  
-  // Try common date formats
-  const formats = ["%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%Y/%m/%d"];
-  for (const fmt of formats) {
-    try {
-      let dateStr = s;
-      if (fmt === "%d.%m.%Y" || fmt === "%d.%m.%y") {
-        const parts = s.split('.');
-        if (parts.length === 3) {
-          const day = parts[0].padStart(2, '0');
-          const month = parts[1].padStart(2, '0');
-          const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-          dateStr = `${year}-${month}-${day}`;
-        }
-      }
-      const date = new Date(dateStr);
-      if (!isNaN(date)) return date;
-    } catch (e) {
-      continue;
-    }
-  }
-  
-  // Fallback to Date.parse
-  const date = new Date(s);
-  return isNaN(date) ? null : date;
-};
+.card-title{
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 900;
+  margin: 0 0 10px 0;
+  color: var(--text);
+}
+.card-subchips{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: -2px;
+  margin-bottom: 10px;
+}
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-bd);
+  background: var(--chip-bg);
+  font-size: 13px;
+  color: var(--text);
+  opacity: .95;
+}
 
-const updateColor = (updatedAtValue) => {
-  const d = tryParseDate(updatedAtValue);
-  if (!d) return ["gray", "—"];
-  
-  const today = new Date();
-  const diffTime = Math.abs(today - d);
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  
-  if (diffDays <= 7) return ["green", d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })];
-  if (diffDays <= 14) return ["yellow", d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })];
-  return ["red", d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })];
-};
+.card-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 18px;
+  margin-top: 6px;
+}
+.card-item{
+  font-size: 14px;
+  color: var(--text);
+}
+.card-item b{ color: var(--text); }
 
-const moneyFmt = (v) => {
-  const s = safeText(v, "—");
-  if (s === "—") return s;
-  
-  try {
-    let x = s.replace(/\s+/g, '').replace(',', '.');
-    x = parseFloat(x);
-    if (isNaN(x)) throw new Error("Invalid number");
-    
-    // Format with spaces as thousand separators
-    const parts = x.toFixed(2).split(".");
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-    return `${parts.join(",").replace(".00", "")} ₽`;
-  } catch (e) {
-    return s.includes("₽") || s.toLowerCase().includes("руб") ? s : `${s} ₽`;
-  }
-};
+.card-tags{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.tag{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-bd);
+  background: var(--chip-bg);
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 800;
+}
+.tag-gray{ opacity: .92; }
+.tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
+.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
+.tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
-const numFmt = (v) => {
-  const s = safeText(v, "—");
-  if (s === "—") return s;
-  
-  try {
-    let x = s.replace(/\s+/g, '').replace(',', '.');
-    x = parseFloat(x);
-    if (isNaN(x)) throw new Error("Invalid number");
-    
-    if (Number.isInteger(x)) {
-      return x.toLocaleString('ru-RU').replace(/,/g, " ");
-    }
-    return x.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  } catch (e) {
-    return s;
-  }
-};
+.card-actions{
+  display:flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.a-btn{
+  flex: 1 1 0;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--btn-bd);
+  background: var(--btn-bg);
+  text-decoration:none !important;
+  color: var(--text) !important;
+  font-weight: 800;
+  font-size: 14px;
+  transition: .12s ease-in-out;
+}
+.a-btn:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(0,0,0,.10);
+}
+.a-btn.disabled{
+  opacity: .45;
+  pointer-events:none;
+}
 
-const dateFmt = (v) => {
-  const d = tryParseDate(v);
-  if (!d) return "—";
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-};
+.section{
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+}
+.section-title{
+  font-weight: 900;
+  color: var(--text);
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.row{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text);
+  font-size: 13.5px;
+}
+.row b{ color: var(--text); }
+.row .muted{ color: var(--muted); }
 
-const moveProchieToBottom = (items) => {
-  if (!items || items.length === 0) return items;
-  
-  const isProchie = (x) => {
-    const nx = normCol(x);
-    return nx === "прочие" || nx === "прочее";
-  };
-  
-  const prochie = items.filter(x => isProchie(x));
-  const rest = items.filter(x => !isProchie(x));
-  return [...rest, ...prochie];
-};
+.issue-box{
+  border: 1px solid rgba(239,68,68,.25);
+  background: rgba(239,68,68,.08);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+}
 
-// Status color mapping for borders
-const statusColors = {
-  green: '#22c55e',
-  yellow: '#f59e0b',
-  red: '#ef4444',
-  blue: '#3b82f6'
-};
+@media (max-width: 900px){
+  .card-grid{ grid-template-columns: 1fr; }
+  .card-title{ font-size: 18px; }
+  .card-actions{ flex-direction: column; }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-export default function App() {
-  // State for filters
-  const [sectorSel, setSectorSel] = useState("Все");
-  const [districtSel, setDistrictSel] = useState("Все");
-  const [statusSel, setStatusSel] = useState("Все");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filteredData, setFilteredData] = useState(mockData);
-  
-  // Get unique values for filters
-  const sectors = ["Все", ...moveProchieToBottom(
-    [...new Set(mockData.map(item => safeText(item.sector)))].filter(s => s !== "—")
-  )];
-  
-  const districts = ["Все", ...Array.from(
-    new Set(mockData.map(item => safeText(item.district)))
-  ).filter(s => s !== "—").sort()];
-  
-  const statuses = ["Все", ...Array.from(
-    new Set(mockData.map(item => safeText(item.status)))
-  ).filter(s => s !== "—").sort()];
-  
-  // Filter data based on selections
-  useEffect(() => {
-    let result = [...mockData];
-    
-    if (sectorSel !== "Все") {
-      result = result.filter(item => safeText(item.sector) === sectorSel);
-    }
-    
-    if (districtSel !== "Все") {
-      result = result.filter(item => safeText(item.district) === districtSel);
-    }
-    
-    if (statusSel !== "Все") {
-      result = result.filter(item => safeText(item.status) === statusSel);
-    }
-    
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(item => {
-        const searchStr = [
-          safeText(item.name),
-          safeText(item.address),
-          safeText(item.responsible)
-        ].join(" ").toLowerCase();
-        return searchStr.includes(q);
-      });
-    }
-    
-    setFilteredData(result);
-  }, [sectorSel, districtSel, statusSel, searchQuery]);
-  
-  // Placeholder for crest image (base64 encoded)
-  const crestB64 = null; // In a real app, this would be a base64 string of the image
-  
-  return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] font-sans">
-      <style jsx global>{`
-        :root {
-          --bg: #f7f8fb;
-          --card: #ffffff;
-          --card2: rgba(15,23,42,.03);
-          --text: #0f172a;
-          --muted: rgba(15,23,42,.72);
-          --border: rgba(15,23,42,.10);
-          --shadow: rgba(0,0,0,.06);
-          --chip-bg: rgba(15,23,42,.05);
-          --chip-bd: rgba(15,23,42,.10);
-          --btn-bg: rgba(255,255,255,.95);
-          --btn-bd: rgba(15,23,42,.12);
-          --hr: rgba(15,23,42,.12);
-        }
 
-        @media (prefers-color-scheme: dark) {
-          :root {
-            --bg: #0b1220;
-            --card: #111a2b;
-            --card2: rgba(255,255,255,.04);
-            --text: rgba(255,255,255,.92);
-            --muted: rgba(255,255,255,.70);
-            --border: rgba(255,255,255,.12);
-            --shadow: rgba(0,0,0,.35);
-            --chip-bg: rgba(255,255,255,.06);
-            --chip-bd: rgba(255,255,255,.12);
-            --btn-bg: rgba(17,26,43,.90);
-            --btn-bd: rgba(255,255,255,.14);
-            --hr: rgba(255,255,255,.14);
-          }
-        }
+# =============================
+# HERO
+# =============================
+crest_html = (
+    f'<img src="data:image/png;base64,{crest_b64}" alt="Герб"/>'
+    if crest_b64
+    else '<span style="color:rgba(255,255,255,.8);font-weight:800;font-size:12px;">герб</span>'
+)
 
-        .hero {
-          background: radial-gradient(1200px 380px at 22% 30%, rgba(60,130,255,.22), rgba(0,0,0,0) 55%),
-                      linear-gradient(135deg, #0b2a57, #1b4c8f);
-          box-shadow: 0 18px 34px rgba(0,0,0,.18);
-          position: relative;
-          overflow: hidden;
-        }
-        
-        .hero::after {
-          content: "";
-          position: absolute;
-          inset: -40px -120px auto auto;
-          width: 520px;
-          height: 320px;
-          background: rgba(255,255,255,.08);
-          transform: rotate(14deg);
-          border-radius: 32px;
-        }
-        
-        .tag-green {
-          background: rgba(34,197,94,.12);
-          border-color: rgba(34,197,94,.22);
-        }
-        
-        .tag-yellow {
-          background: rgba(245,158,11,.14);
-          border-color: rgba(245,158,11,.25);
-        }
-        
-        .tag-red {
-          background: rgba(239,68,68,.12);
-          border-color: rgba(239,68,68,.22);
-        }
-        
-        .issue-box {
-          border: 1px solid rgba(239,68,68,.25);
-          background: rgba(239,68,68,.08);
-        }
-        
-        .card {
-          background: var(--card);
-          border: 1px solid var(--border);
-          border-radius: 16px;
-          padding: 16px;
-          box-shadow: 0 10px 22px var(--shadow);
-          margin-bottom: 14px;
-          position: relative;
-          transition: all 0.2s ease;
-        }
-        
-        .card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 12px 28px var(--shadow);
-        }
-        
-        .a-btn {
-          flex: 1 1 0;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 12px;
-          border-radius: 12px;
-          border: 1px solid var(--btn-bd);
-          background: var(--btn-bg);
-          text-decoration: none !important;
-          color: var(--text) !important;
-          font-weight: 800;
-          font-size: 14px;
-          transition: .12s ease-in-out;
-        }
-        
-        .a-btn:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 10px 18px rgba(0,0,0,.10);
-        }
-        
-        .a-btn.disabled {
-          opacity: .45;
-          pointer-events: none;
-        }
-      `}</style>
-      
-      {/* Hero Section */}
-      <div className="hero-wrap max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="hero rounded-2xl p-5">
-          <div className="hero-row flex flex-col md:flex-row items-start md:items-center gap-4">
-            <div className="hero-crest flex-shrink-0 w-16 h-16 rounded-xl bg-white/10 border border-white/16 flex items-center justify-center">
-              {crestB64 ? (
-                <img 
-                  src={`image/png;base64,${crestB64}`} 
-                  alt="Герб" 
-                  className="w-12 h-12 object-contain drop-shadow-md"
-                />
-              ) : (
-                <span className="text-white/80 font-bold text-xs">герб</span>
-              )}
-            </div>
-            <div className="hero-titles flex-1 min-w-0">
-              <div className="hero-ministry text-white font-extrabold text-xl md:text-2xl leading-tight">
-                Министерство восстановления, развития приграничья и строительства Курской области
-              </div>
-              <div className="hero-app text-white font-bold text-lg mt-1">
-                Реестр объектов
-              </div>
-              <div className="hero-sub text-white/78 text-sm mt-1">
-                Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      {/* Filters Section */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium mb-1">🏷️ Отрасль</label>
-            <select
-              value={sectorSel}
-              onChange={(e) => setSectorSel(e.target.value)}
-              className="w-full px-3 py-2 border border-[var(--border)] rounded-lg bg-[var(--card)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {sectors.map(sector => (
-                <option key={sector} value={sector}>{sector}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">📍 Район</label>
-            <select
-              value={districtSel}
-              onChange={(e) => setDistrictSel(e.target.value)}
-              className="w-full px-3 py-2 border border-[var(--border)] rounded-lg bg-[var(--card)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {districts.map(district => (
-                <option key={district} value={district}>{district}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">📌 Статус</label>
-            <select
-              value={statusSel}
-              onChange={(e) => setStatusSel(e.target.value)}
-              className="w-full px-3 py-2 border border-[var(--border)] rounded-lg bg-[var(--card)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {statuses.map(status => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">🔎 Поиск (наименование / адрес / ответственный)</label>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Введите текст для поиска..."
-            className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--card)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        
-        <div className="text-sm text-[var(--muted)] mb-6">
-          Показано объектов: {filteredData.length} из {mockData.length}
-        </div>
-        
-        <hr className="border-t border-[var(--hr)] my-8" />
-        
-        {/* Cards Section */}
-        <div className="space-y-6">
-          {filteredData.map(item => {
-            const title = safeText(item.name, "Объект");
-            const sector = safeText(item.sector, "—");
-            const district = safeText(item.district, "—");
-            const address = safeText(item.address, "—");
-            const responsible = safeText(item.responsible, "—");
-            
-            const status = safeText(item.status, "—");
-            const workFlag = safeText(item.work_flag, "—");
-            const issues = safeText(item.issues, "—");
-            
-            const cardUrl = safeText(item.card_url, "");
-            
-            // Get colors
-            const accent = statusAccent(status);
-            const wCol = worksColor(workFlag);
-            const [uCol, uTxt] = updateColor(item.updated_at);
-            
-            // Determine tag classes
-            const sTagClass = accent === "green" ? "tag-green" : 
-                             accent === "yellow" ? "tag-yellow" : 
-                             accent === "red" ? "tag-red" : "tag-gray";
-            
-            const wTagClass = wCol === "green" ? "tag-green" : 
-                             wCol === "red" ? "tag-red" : "tag-gray";
-            
-            const uTagClass = uCol === "green" ? "tag-green" : 
-                             uCol === "yellow" ? "tag-yellow" : 
-                             uCol === "red" ? "tag-red" : "tag-gray";
-            
-            // Get border color based on status
-            const borderColor = statusColors[accent] || 'var(--border)';
-            
-            return (
-              <div 
-                key={item.id} 
-                className="card"
-                style={{ 
-                  borderColor: borderColor,
-                  borderLeftWidth: '4px',
-                  boxShadow: '0 10px 22px var(--shadow)'
-                }}
-              >
-                <h3 className="card-title text-2xl font-extrabold mb-3">{title}</h3>
-                
-                <div className="card-subchips flex flex-wrap gap-2 mb-3">
-                  <span className="chip inline-flex items-center px-3 py-1.5 border border-[var(--chip-bd)] bg-[var(--chip-bg)] rounded-full text-sm">
-                    🏷️ {sector}
-                  </span>
-                  <span className="chip inline-flex items-center px-3 py-1.5 border border-[var(--chip-bd)] bg-[var(--chip-bg)] rounded-full text-sm">
-                    📍 {district}
-                  </span>
-                </div>
-                
-                <div className="card-grid grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 mb-4">
-                  <div className="card-item">
-                    🗺️ <span className="font-bold">Адрес:</span> {address}
-                  </div>
-                  <div className="card-item">
-                    👤 <span className="font-bold">Ответственный:</span> {responsible}
-                  </div>
-                </div>
-                
-                <div className="card-tags flex flex-wrap gap-2 mb-5">
-                  <span className={`tag ${sTagClass} inline-flex items-center px-3 py-1.5 border rounded-full text-sm font-bold`}>
-                    📌 Статус: {status}
-                  </span>
-                  <span className={`tag ${wTagClass} inline-flex items-center px-3 py-1.5 border rounded-full text-sm font-bold`}>
-                    🛠️ Работы: {workFlag}
-                  </span>
-                  <span className={`tag ${uTagClass} inline-flex items-center px-3 py-1.5 border rounded-full text-sm font-bold`}>
-                    ⏱️ Обновлено: {uTxt}
-                  </span>
-                </div>
-                
-                <div className="card-actions flex flex-col sm:flex-row gap-3 mb-5">
-                  {cardUrl && cardUrl !== "—" ? (
-                    <a 
-                      href={cardUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="a-btn flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-[var(--btn-bd)] bg-[var(--btn-bg)] rounded-xl font-bold text-sm hover:translate-y-[-1px] hover:shadow-md transition-all"
-                    >
-                      📄 Открыть карточку
-                    </a>
-                  ) : (
-                    <span className="a-btn flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-[var(--btn-bd)] bg-[var(--btn-bg)] rounded-xl font-bold text-sm opacity-45 cursor-not-allowed">
-                      📄 Открыть карточку
-                    </span>
-                  )}
-                </div>
-                
-                {/* Expandable Passport Section */}
-                <details className="mt-6 border-t border-[var(--border)] pt-5">
-                  <summary className="cursor-pointer font-bold text-lg flex items-center gap-2">
-                    📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть
-                  </summary>
-                  
-                  <div className="mt-4 space-y-5">
-                    {/* Issues Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-2">⚠️ Проблемные вопросы</div>
-                      {issues !== "—" ? (
-                        <div className="issue-box rounded-lg p-3 text-sm">
-                          {issues}
-                        </div>
-                      ) : (
-                        <div className="row text-sm text-[var(--muted)]">—</div>
-                      )}
-                    </div>
-                    
-                    {/* Programs Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-3">🏛️ Программы</div>
-                      <div className="space-y-2">
-                        <div className="row text-sm">
-                          <span className="font-bold">ГП/СП:</span> {safeText(item.state_program, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">ФП:</span> {safeText(item.federal_project, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">РП:</span> {safeText(item.regional_program, "—")}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Agreement Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-3">🧾 Соглашение</div>
-                      <div className="space-y-2">
-                        <div className="row text-sm">
-                          <span className="font-bold">№:</span> {safeText(item.agreement, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Дата:</span> {dateFmt(item.agreement_date)}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Сумма:</span> {moneyFmt(item.agreement_amount)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Parameters Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-3">📦 Параметры</div>
-                      <div className="space-y-2">
-                        <div className="row text-sm">
-                          <span className="font-bold">Мощность:</span> {safeText(item.capacity_seats, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Площадь:</span> {safeText(item.area_m2, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Целевой срок:</span> {dateFmt(item.target_deadline)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* PSD/Expertise Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-3">🗂️ ПСД / Экспертиза</div>
-                      <div className="space-y-2">
-                        <div className="row text-sm">
-                          <span className="font-bold">ПСД:</span> {safeText(item.design, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Стоимость ПСД:</span> {moneyFmt(item.psd_cost)}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Проектировщик:</span> {safeText(item.designer, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Экспертиза:</span> {safeText(item.expertise, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Дата экспертизы:</span> {dateFmt(item.expertise_date)}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Заключение:</span> {safeText(item.expertise_conclusion, "—")}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* RNS Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-3">🏗️ РНС</div>
-                      <div className="space-y-2">
-                        <div className="row text-sm">
-                          <span className="font-bold">№ РНС:</span> {safeText(item.rns, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Дата:</span> {dateFmt(item.rns_date)}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Срок действия:</span> {dateFmt(item.rns_expiry)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Contract Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-3">🧩 Контракт</div>
-                      <div className="space-y-2">
-                        <div className="row text-sm">
-                          <span className="font-bold">№:</span> {safeText(item.contract, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Дата:</span> {dateFmt(item.contract_date)}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Подрядчик:</span> {safeText(item.contractor, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Цена:</span> {moneyFmt(item.contract_price)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Timeline/Finance Section */}
-                    <div className="section rounded-xl border border-[var(--border)] bg-[var(--card2)] p-4">
-                      <div className="section-title font-extrabold text-sm mb-3">⏳ Сроки / финансы</div>
-                      <div className="space-y-2">
-                        <div className="row text-sm">
-                          <span className="font-bold">Окончание (план):</span> {dateFmt(item.end_date_plan)}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Окончание (факт):</span> {dateFmt(item.end_date_fact)}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Готовность:</span> {safeText(item.readiness, "—")}
-                        </div>
-                        <div className="row text-sm">
-                          <span className="font-bold">Оплачено:</span> {moneyFmt(item.paid)}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </details>
-              </div>
-            );
-          })}
-          
-          {filteredData.length === 0 && (
-            <div className="text-center py-12 text-[var(--muted)]">
-              Нет объектов, соответствующих выбранным фильтрам
-            </div>
-          )}
-        </div>
+st.markdown(
+    f"""
+<div class="hero-wrap">
+  <div class="hero">
+    <div class="hero-row">
+      <div class="hero-crest">{crest_html}</div>
+      <div class="hero-titles">
+        <div class="hero-ministry">Министерство восстановления, развития приграничья и строительства Курской области</div>
+        <div class="hero-app">Реестр объектов</div>
+        <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку.</div>
       </div>
     </div>
-  );
-}
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# =============================
+# AUTH (PASSWORD GATE)
+# =============================
+def get_app_password() -> str | None:
+    try:
+        return st.secrets.get("APP_PASSWORD", None)
+    except Exception:
+        return None
+
+
+APP_PASSWORD = get_app_password()
+
+if APP_PASSWORD:
+    if "auth_ok" not in st.session_state:
+        st.session_state.auth_ok = False
+
+    if not st.session_state.auth_ok:
+        st.markdown("### 🔐 Доступ к реестру")
+        st.write("Введите пароль для просмотра данных.")
+
+        with st.form("login_form", clear_on_submit=False):
+            pwd = st.text_input("Пароль", type="password")
+            submitted = st.form_submit_button("Войти")
+
+        if submitted:
+            if pwd == APP_PASSWORD:
+                st.session_state.auth_ok = True
+                st.success("Доступ разрешён.")
+                st.rerun()
+            else:
+                st.error("Неверный пароль.")
+        st.stop()
+
+
+# =============================
+# LOAD + PREPARE
+# =============================
+raw = load_data()
+if raw.empty:
+    st.error(
+        "Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets "
+        "или наличие .xlsx в репозитории."
+    )
+    st.stop()
+
+df = normalize_schema(raw)
+
+# Списки фильтров
+sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
+districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()])
+statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
+
+sectors = move_prochie_to_bottom(sectors)
+
+sectors = ["Все"] + sectors
+districts = ["Все"] + districts
+statuses = ["Все"] + statuses
+
+
+# =============================
+# FILTERS
+# =============================
+c1, c2, c3 = st.columns(3)
+with c1:
+    sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
+with c2:
+    district_sel = st.selectbox("📍 Район", districts, index=0, key="f_district")
+with c3:
+    status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
+
+q = st.text_input("🔎 Поиск (наименование / адрес / ответственный)", value="", key="f_search").strip().lower()
+
+filtered = df.copy()
+
+if sector_sel != "Все":
+    filtered = filtered[filtered["sector"].astype(str) == str(sector_sel)]
+if district_sel != "Все":
+    filtered = filtered[filtered["district"].astype(str) == str(district_sel)]
+if status_sel != "Все":
+    filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
+
+if q:
+
+    def row_match(r):
+        s = " ".join(
+            [
+                str(r.get("name", "")),
+                str(r.get("address", "")),
+                str(r.get("responsible", "")),
+            ]
+        ).lower()
+        return q in s
+
+    filtered = filtered[filtered.apply(row_match, axis=1)]
+
+st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
+st.divider()
+
+
+# =============================
+# CARD RENDER
+# =============================
+def render_kv(label: str, value: str):
+    st.markdown(f'<div class="row"><b>{label}:</b> {value}</div>', unsafe_allow_html=True)
+
+
+def render_card(row: pd.Series):
+    title = safe_text(row.get("name", ""), fallback="Объект")
+    sector = safe_text(row.get("sector", ""), fallback="—")
+    district = safe_text(row.get("district", ""), fallback="—")
+    address = safe_text(row.get("address", ""), fallback="—")
+    responsible = safe_text(row.get("responsible", ""), fallback="—")
+
+    status = safe_text(row.get("status", ""), fallback="—")
+    work_flag = safe_text(row.get("work_flag", ""), fallback="—")
+    issues = safe_text(row.get("issues", ""), fallback="—")
+
+    # URL КАРТОЧКИ — строго из card_url_text
+    card_url = ensure_url(row.get("card_url_text", ""))
+
+    # Цвета
+    accent = status_accent(status)
+    w_col = works_color(work_flag)
+    u_col, u_txt = update_color(row.get("updated_at", ""))
+
+    # теги
+    s_col = "tag-gray"
+    if accent == "green":
+        s_col = "tag-green"
+    elif accent == "yellow":
+        s_col = "tag-yellow"
+    elif accent == "red":
+        s_col = "tag-red"
+
+    w_tag = "tag-gray"
+    if w_col == "green":
+        w_tag = "tag-green"
+    elif w_col == "yellow":
+        w_tag = "tag-yellow"
+    elif w_col == "red":
+        w_tag = "tag-red"
+
+    u_tag = "tag-gray"
+    if u_col == "green":
+        u_tag = "tag-green"
+    elif u_col == "yellow":
+        u_tag = "tag-yellow"
+    elif u_col == "red":
+        u_tag = "tag-red"
+
+    # кнопка (ОДНА)
+    btn_card = (
+        f'<a class="a-btn" href="{card_url}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
+        if card_url
+        else '<span class="a-btn disabled">📄 Открыть карточку</span>'
+    )
+
+    # ШАПКА карточки
+    st.markdown(
+        f"""
+<div class="card" data-accent="{accent}">
+  <div class="card-title">{title}</div>
+
+  <div class="card-subchips">
+    <span class="chip">🏷️ {sector}</span>
+    <span class="chip">📍 {district}</span>
+  </div>
+
+  <div class="card-grid">
+    <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
+    <div class="card-item">👤 <b>Ответственный:</b> {responsible}</div>
+  </div>
+
+  <div class="card-tags">
+    <span class="tag {s_col}">📌 Статус: {status}</span>
+    <span class="tag {w_tag}">🛠️ Работы: {work_flag}</span>
+    <span class="tag {u_tag}">⏱️ Обновлено: {u_txt}</span>
+  </div>
+
+  <div class="card-actions">
+    {btn_card}
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    # ПАСПОРТ (свернут по умолчанию)
+    exp_label = "📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть"
+    with st.expander(exp_label, expanded=False):
+        # Проблемные вопросы
+        st.markdown('<div class="section"><div class="section-title">⚠️ Проблемные вопросы</div>', unsafe_allow_html=True)
+        if issues != "—":
+            st.markdown(f'<div class="issue-box">{issues}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="row"><span class="muted">—</span></div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Программы
+        st.markdown('<div class="section"><div class="section-title">🏛️ Программы</div>', unsafe_allow_html=True)
+        render_kv("ГП/СП", safe_text(row.get("state_program", ""), "—"))
+        render_kv("ФП", safe_text(row.get("federal_project", ""), "—"))
+        render_kv("РП", safe_text(row.get("regional_program", ""), "—"))
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Соглашение
+        st.markdown('<div class="section"><div class="section-title">🧾 Соглашение</div>', unsafe_allow_html=True)
+        render_kv("№", safe_text(row.get("agreement", ""), "—"))
+        render_kv("Дата", date_fmt(row.get("agreement_date", "")))
+        render_kv("Сумма", money_fmt(row.get("agreement_amount", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Параметры
+        st.markdown('<div class="section"><div class="section-title">📦 Параметры</div>', unsafe_allow_html=True)
+        render_kv("Мощность", safe_text(row.get("capacity_seats", ""), "—"))
+        render_kv("Площадь", safe_text(row.get("area_m2", ""), "—"))
+        render_kv("Целевой срок", date_fmt(row.get("target_deadline", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ПСД / Экспертиза
+        st.markdown('<div class="section"><div class="section-title">🗂️ ПСД / Экспертиза</div>', unsafe_allow_html=True)
+        render_kv("ПСД", safe_text(row.get("design", ""), "—"))
+        render_kv("Стоимость ПСД", money_fmt(row.get("psd_cost", "")))
+        render_kv("Проектировщик", safe_text(row.get("designer", ""), "—"))
+        render_kv("Экспертиза", safe_text(row.get("expertise", ""), "—"))
+        render_kv("Дата экспертизы", date_fmt(row.get("expertise_date", "")))
+        render_kv("Заключение", safe_text(row.get("expertise_conclusion", ""), "—"))
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # РНС
+        st.markdown('<div class="section"><div class="section-title">🏗️ РНС</div>', unsafe_allow_html=True)
+        render_kv("№ РНС", safe_text(row.get("rns", ""), "—"))
+        render_kv("Дата", date_fmt(row.get("rns_date", "")))
+        render_kv("Срок действия", date_fmt(row.get("rns_expiry", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Контракт
+        st.markdown('<div class="section"><div class="section-title">🧩 Контракт</div>', unsafe_allow_html=True)
+        render_kv("№", safe_text(row.get("contract", ""), "—"))
+        render_kv("Дата", date_fmt(row.get("contract_date", "")))
+        render_kv("Подрядчик", safe_text(row.get("contractor", ""), "—"))
+        render_kv("Цена", money_fmt(row.get("contract_price", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Сроки/финансы
+        st.markdown('<div class="section"><div class="section-title">⏳ Сроки / финансы</div>', unsafe_allow_html=True)
+        render_kv("Окончание (план)", date_fmt(row.get("end_date_plan", "")))
+        render_kv("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))
+        render_kv("Готовность", safe_text(row.get("readiness", ""), "—"))
+        render_kv("Оплачено", money_fmt(row.get("paid", "")))
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =============================
+# OUTPUT
+# =============================
+for _, r in filtered.iterrows():
+    render_card(r)
