@@ -212,13 +212,35 @@ def norm_search(s: str) -> str:
     return s
 
 
-# --- КЛЮЧЕВАЯ ФУНКЦИЯ: убираем любые лидирующие пробелы в HTML,
-# чтобы Streamlit не превращал строки в Markdown-code block
+# --- КЛЮЧ: убираем лидирующие пробелы у каждой строки HTML,
+# чтобы Streamlit не превращал в Markdown-code block
 def html_clean(s: str) -> str:
     if s is None:
         return ""
     lines = str(s).splitlines()
     return "\n".join([ln.lstrip() for ln in lines]).strip()
+
+
+# --- Фото: Google Drive link -> прямая картинка
+def extract_drive_file_id(url: str) -> str:
+    u = safe_text(url, fallback="").strip()
+    if not u:
+        return ""
+    m = re.search(r"/file/d/([a-zA-Z0-9_-]+)", u)
+    if m:
+        return m.group(1)
+    m = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", u)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def drive_image_url(url: str, width: int = 1200) -> str:
+    fid = extract_drive_file_id(url)
+    if not fid:
+        return ""
+    # thumbnail обычно работает стабильнее для картинок
+    return f"https://drive.google.com/thumbnail?id={fid}&sz=w{int(width)}"
 
 
 # =============================
@@ -280,7 +302,7 @@ def build_row_search_blob(row: pd.Series) -> str:
 # =============================
 # DATA LOADING
 # =============================
-@st.cache_data(show_spinner=False, ttl=120)  # 2 мин: авто-подтяжка без кнопки
+@st.cache_data(show_spinner=False, ttl=120)
 def load_data() -> pd.DataFrame:
     csv_url = None
     try:
@@ -299,7 +321,6 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
-    # fallback local
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -355,6 +376,11 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["card_url_text"] = df[
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
+
+    # --- ФОТО
+    out["photo_url"] = df[col("photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото")] if col(
+        "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
+    ) else ""
 
     # Паспортные поля
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
@@ -414,7 +440,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (оригинал + немного воздуха)
+# STYLES
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -527,7 +553,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border-radius: 12px !important;
 }
 
-/* Карточка (чуть больше воздуха) */
+/* Карточка */
 .card{
   background:
     radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.08), rgba(0,0,0,0) 55%),
@@ -535,7 +561,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
     linear-gradient(180deg, #ffffff, #f4f8ff);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 22px; /* ВОЗДУХ */
+  padding: 22px;
   box-shadow: 0 10px 22px var(--shadow);
   margin-bottom: 14px;
   position: relative;
@@ -576,6 +602,27 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   background: var(--chip-bg);
   font-size: 13px; color: var(--text) !important;
   font-weight: 800;
+}
+
+/* ФОТО В КАРТОЧКЕ */
+.photo-wrap{
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(15,23,42,.12);
+  background: rgba(255,255,255,.85);
+  overflow: hidden;
+  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+  margin: 10px 0 14px 0;
+}
+.photo{
+  display:block;
+  width:100%;
+  height:auto;
+  aspect-ratio: 16 / 9;    /* фиксируем, чтобы ничего не "плыло" */
+  object-fit: cover;
+}
+@media (max-width: 900px){
+  .photo{ aspect-ratio: 4 / 3; }
 }
 
 .card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin-top: 8px; }
@@ -623,14 +670,11 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   overflow: hidden;
   box-shadow: 0 10px 18px rgba(0,0,0,.06);
 }
-
-/* скрытый чекбокс */
 .passport-toggle{
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
-
 .passport-summary{
   cursor: pointer;
   padding: 12px 12px;
@@ -649,7 +693,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .passport-toggle:checked + .passport-summary:before{
   content: "▾";
 }
-
 .passport-body{
   display: none;
   padding: 12px 12px 14px 12px;
@@ -658,14 +701,12 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .passport-toggle:checked ~ .passport-body{
   display: block;
 }
-
 .passport-grid{
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 .section-wide{ grid-column: 1 / -1; }
-
 .section{
   margin-top: 0;
   padding: 12px;
@@ -686,7 +727,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 }
 .row b{ color: var(--text) !important; }
 .row .muted{ color: var(--muted) !important; }
-
 .issue-box{
   border: 1px solid rgba(239,68,68,.22);
   background: rgba(239,68,68,.07);
@@ -698,8 +738,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   word-break: break-word;
   overflow-wrap: anywhere;
 }
-
-/* стрелка-свернуть снизу */
 .passport-close{
   display: none;
   justify-content:center;
@@ -916,12 +954,23 @@ def render_card(row: pd.Series):
     u_cls = tag_class(u_col)
 
     card_url = ensure_url(row.get("card_url_text", ""))
+    photo_src = drive_image_url(row.get("photo_url", ""))  # <-- ФОТО
 
     btn_html = html_clean(
         f'<a class="a-btn" href="{esc(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
         if card_url
         else '<span class="a-btn disabled">📄 Открыть карточку</span>'
     )
+
+    photo_html = ""
+    if photo_src:
+        photo_html = html_clean(
+            f"""
+<div class="photo-wrap">
+  <img class="photo" src="{esc(photo_src)}" alt="Фото объекта" loading="lazy">
+</div>
+"""
+        )
 
     issues_html = html_clean(
         f'<div class="issue-box">{esc(issues)}</div>'
@@ -1018,6 +1067,8 @@ def render_card(row: pd.Series):
     <span class="chip">🏷️ {sector}</span>
     <span class="chip">📍 {district}</span>
   </div>
+
+  {photo_html}
 
   <div class="card-grid">
     <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
