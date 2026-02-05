@@ -212,7 +212,7 @@ def norm_search(s: str) -> str:
     return s
 
 
-# --- Streamlit иногда превращает строки с отступом в markdown-code: убираем отступы
+# Streamlit иногда превращает HTML-строки с отступом в markdown-code block — убираем отступы
 def html_clean(s: str) -> str:
     if s is None:
         return ""
@@ -220,7 +220,7 @@ def html_clean(s: str) -> str:
     return "\n".join([ln.lstrip() for ln in lines]).strip()
 
 
-# --- Фото: Google Drive link -> прямая картинка
+# Фото: Google Drive link -> прямая картинка
 def extract_drive_file_id(url: str) -> str:
     u = safe_text(url, fallback="").strip()
     if not u:
@@ -238,6 +238,7 @@ def drive_image_url(url: str, width: int = 1200) -> str:
     fid = extract_drive_file_id(url)
     if not fid:
         return ""
+    # thumbnail — стабильнее для изображений
     return f"https://drive.google.com/thumbnail?id={fid}&sz=w{int(width)}"
 
 
@@ -375,6 +376,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
 
+    # Фото
     out["photo_url"] = df[col("photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото")] if col(
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
@@ -478,6 +480,7 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
 }
 
+/* фикс цвета текста на мобиле */
 html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
   color: var(--text);
 }
@@ -487,8 +490,48 @@ label, [data-testid="stWidgetLabel"] *{
   color: var(--text) !important;
   opacity: 1 !important;
 }
-h1,h2,h3,h4,h5,h6{
+h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
+
+/* --- ВАЖНО: фиксы тёмных кнопок/полей на мобильном --- */
+div.stButton > button,
+div[data-testid="stFormSubmitButton"] > button,
+button[kind="primary"], button[kind="secondary"]{
+  background: rgba(255,255,255,.96) !important;
   color: var(--text) !important;
+  border: 1px solid rgba(15,23,42,.18) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 18px rgba(0,0,0,.08) !important;
+  opacity: 1 !important;
+}
+div.stButton > button:hover,
+div[data-testid="stFormSubmitButton"] > button:hover{
+  filter: brightness(0.98);
+}
+div.stButton > button:disabled,
+div[data-testid="stFormSubmitButton"] > button:disabled{
+  opacity: .55 !important;
+  background: rgba(255,255,255,.92) !important;
+  color: rgba(15,23,42,.75) !important;
+}
+
+/* выпадающие списки (popover) — чтобы не было тёмного фона */
+div[data-baseweb="popover"]{
+  background: #ffffff !important;
+  color: var(--text) !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(15,23,42,.14) !important;
+  box-shadow: 0 18px 32px rgba(0,0,0,.14) !important;
+}
+div[role="listbox"]{
+  background: #ffffff !important;
+  color: var(--text) !important;
+}
+div[role="option"]{
+  background: #ffffff !important;
+  color: var(--text) !important;
+}
+div[role="option"]:hover{
+  background: rgba(15,23,42,.06) !important;
 }
 
 /* HERO */
@@ -548,6 +591,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   box-shadow: 0 10px 18px rgba(0,0,0,.06) !important;
   background: rgba(255,255,255,.96) !important;
   border-radius: 12px !important;
+  color: var(--text) !important;
 }
 
 /* Карточка */
@@ -589,46 +633,63 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
               0 0 18px rgba(59,130,246,.10);
 }
 
-.card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; color: var(--text) !important; }
-.card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 12px; }
-
+.card-title{
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 900;
+  margin: 0 0 10px 0;
+  color: var(--text) !important;
+}
+.card-subchips{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: -2px;
+  margin-bottom: 12px;
+}
 .chip{
   display:inline-flex; align-items:center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
+  padding: 6px 10px;
+  border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px; color: var(--text) !important;
+  font-size: 13px;
+  color: var(--text) !important;
   font-weight: 800;
 }
 
-/* Фото: меньше + аккуратная рамка в стиле карточек */
+/* ФОТО — средний размер + лаконичная рамка (как в первом удачном варианте, но чуть меньше) */
 .photo-wrap{
   width: 100%;
   border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.14);
-  background:
-    radial-gradient(900px 260px at 18% 18%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%),
-    radial-gradient(900px 260px at 86% 26%, rgba(16,185,129,.08), rgba(0,0,0,0) 55%),
-    linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,255,.98));
+  border: 1px solid rgba(15,23,42,.12);
+  background: rgba(255,255,255,.88);
   overflow: hidden;
   box-shadow: 0 12px 22px rgba(0,0,0,.08);
   margin: 10px 0 14px 0;
-  padding: 8px;
+  position: relative;
 }
-.photo-inner{
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(15,23,42,.12);
-  background: rgba(255,255,255,.90);
+.photo-wrap:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 48%),
+              radial-gradient(900px 260px at 14% 12%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%);
 }
 .photo{
   display:block;
   width:100%;
-  height: 210px;          /* меньше */
+  height:auto;
+  aspect-ratio: 16 / 9;   /* НЕ плывёт */
   object-fit: cover;
 }
+.photo-size{
+  max-height: 280px;      /* средний размер */
+}
 @media (max-width: 900px){
-  .photo{ height: 170px; }
+  .photo-size{ max-height: 210px; }
+  .photo{ aspect-ratio: 4 / 3; }
 }
 
 /* Адрес отдельной строкой */
@@ -655,10 +716,13 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 }
 .tag{
   display:inline-flex; align-items:center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
-  border: 1px solid rgba(15,23,42,.10);
-  background: rgba(15,23,42,.05);
-  font-size: 13px; color: var(--text) !important; font-weight: 800;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-bd);
+  background: var(--chip-bg);
+  font-size: 13px;
+  color: var(--text) !important;
+  font-weight: 800;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
@@ -672,12 +736,12 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid rgba(15,23,42,.12);
-  background: rgba(255,255,255,.78);
+  background: rgba(255,255,255,.86);
   font-size: 13px;
   font-weight: 900;
   color: var(--text) !important;
   box-shadow: 0 10px 18px rgba(0,0,0,.06);
-  white-space: nowrap; /* справа аккуратно */
+  white-space: nowrap;
 }
 .resp-chip .muted{
   font-weight: 800;
@@ -1011,9 +1075,7 @@ def render_card(row: pd.Series):
         photo_html = html_clean(
             f"""
 <div class="photo-wrap">
-  <div class="photo-inner">
-    <img class="photo" src="{esc(photo_src)}" alt="Фото объекта" loading="lazy">
-  </div>
+  <img class="photo photo-size" src="{esc(photo_src)}" alt="Фото объекта" loading="lazy">
 </div>
 """
         )
@@ -1104,7 +1166,6 @@ def render_card(row: pd.Series):
 """
     )
 
-    # Теги слева + ответственный справа (в одной строке)
     resp_html = html_clean(
         f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>'
         if responsible and responsible != "—"
