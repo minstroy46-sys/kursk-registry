@@ -87,6 +87,17 @@ def extract_url(value: str) -> str:
     return matches[0]
 
 
+def ensure_http(url: str) -> str:
+    if not url:
+        return ""
+    u = url.strip()
+    if u.startswith("http"):
+        return u
+    if u.startswith("docs.google.com") or u.startswith("drive.google.com"):
+        return f"https://{u}"
+    return u
+
+
 def move_prochie_to_bottom(items: list[str]) -> list[str]:
     if not items:
         return items
@@ -506,7 +517,7 @@ html, body, [data-testid="stAppViewContainer"]{
 }
 
 .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 0; }
-hero{
+.hero{
   width: 100%;
   border-radius: 18px;
   padding: 18px 18px;
@@ -739,19 +750,6 @@ hero{
   color: var(--muted);
   font-size: 12.5px;
 }
-.passport-btn{
-  margin-top: 8px;
-  cursor: pointer;
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px dashed var(--hr);
-  background: var(--card);
-  color: var(--text);
-  font-weight: 700;
-}
 
 .filters-title{
   font-weight: 900;
@@ -764,7 +762,7 @@ hero{
   border-radius: 16px;
   padding: 12px 14px;
   box-shadow: 0 8px 18px var(--shadow);
-  margin-top: -12px;
+  margin-top: 0;
   margin-bottom: 10px;
 }
 div[data-testid="stSelectbox"] > div,
@@ -889,7 +887,7 @@ with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 with c4:
     q = st.text_input(
-        "Поиск",
+        "Писк",
         value="",
         key="f_search",
         placeholder="Название, адрес, ответственный, аббревиатуры (ФАП, ОДКБ, ФОК...)",
@@ -937,8 +935,8 @@ def render_card(row: pd.Series):
     work_flag = safe_text(row.get("work_flag", ""), fallback="—")
     issues = safe_text(row.get("issues", ""), fallback="—")
 
-    card_url = extract_url(row.get("card_url", "")).strip()
-    folder_url = extract_url(row.get("folder_url", "")).strip()
+    card_url = ensure_http(extract_url(row.get("card_url", "")))
+    folder_url = ensure_http(extract_url(row.get("folder_url", "")))
 
     accent = status_accent(status)
     w_col = works_color(work_flag)
@@ -968,8 +966,8 @@ def render_card(row: pd.Series):
     elif u_col == "red":
         u_tag = "tag-red"
 
-    link_url = card_url if card_url and card_url.startswith("http") else folder_url
-    if link_url and link_url != "—" and link_url.startswith("http"):
+    link_url = card_url or folder_url
+    if link_url and link_url != "—":
         btn_card = f'<a class="a-btn" href="{link_url}" target="_blank" rel="noopener">📄 Открыть карточку</a>'
     else:
         btn_card = '<span class="a-btn disabled">📄 Открыть карточку</span>'
@@ -1075,10 +1073,7 @@ def render_card(row: pd.Series):
   {section("🏗️ РНС", rns_block)}
   {section("🧩 Контракт", contract_block)}
   {section("⏳ Сроки / финансы", timeline_block)}
-  <div class="passport-hint">
-    <button type="button" class="passport-btn" onclick="this.closest('details').open=false">⬆️ Свернуть паспорт</button>
-    <div>или нажмите заголовок паспорта ещё раз</div>
-  </div>
+  <div class="passport-hint">⬆️ Нажмите заголовок паспорта, чтобы свернуть</div>
 </details>
 """
     st.markdown(passport_html, unsafe_allow_html=True)
