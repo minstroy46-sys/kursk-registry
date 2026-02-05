@@ -16,7 +16,7 @@ st.set_page_config(page_title="Реестр объектов", layout="wide")
 # =============================
 # HELPERS
 # =============================
-def safe_text(v, fallback="—"):
+def safe_text(v, fallback="—") -> str:
     if v is None:
         return fallback
     try:
@@ -33,22 +33,25 @@ def safe_text(v, fallback="—"):
 def norm_col(s: str) -> str:
     if s is None:
         return ""
-    s = str(s).strip().lower()
-    s = s.replace("ё", "е")
+    s = str(s).strip().lower().replace("ё", "е")
     s = re.sub(r"\s+", " ", s)
     return s
 
 
 def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
     cols = {norm_col(c): c for c in df.columns}
+    # 1) точное совпадение по нормализованному
     for cand in candidates:
         nc = norm_col(cand)
         if nc in cols:
             return cols[nc]
+    # 2) частичное совпадение
     for cand in candidates:
         nc = norm_col(cand)
+        if not nc:
+            continue
         for c in df.columns:
-            if nc and nc in norm_col(c):
+            if nc in norm_col(c):
                 return c
     return None
 
@@ -90,19 +93,12 @@ def works_color(work_flag: str) -> str:
         return "red"
     if "не вед" in s or "не выполня" in s or "отсутств" in s:
         return "red"
-    if "да" == s or "ведут" in s or "выполня" in s or "идут" in s:
+    if s == "да" or "ведут" in s or "выполня" in s or "идут" in s:
         return "green"
-    # если неясно — нейтрально
     return "gray"
 
 
 def try_parse_date(v) -> date | None:
-    """
-    Поддерживаем:
-    - datetime/date
-    - строки: dd.mm.yyyy / yyyy-mm-dd / etc.
-    - числа Google Sheets/Excel (серийные даты)
-    """
     if v is None:
         return None
     try:
@@ -120,12 +116,10 @@ def try_parse_date(v) -> date | None:
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
-    # Число как серийная дата (Google/Excel)
-    # В CSV часто приходит "45652" или "45652.0"
+    # serial date (Google/Excel)
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
-            # Excel serial date: days since 1899-12-30 (в pandas удобно так)
             dt = pd.to_datetime(num, unit="D", origin="1899-12-30", errors="coerce")
             if pd.isna(dt):
                 return None
@@ -133,14 +127,12 @@ def try_parse_date(v) -> date | None:
         except Exception:
             return None
 
-    # dd.mm.yyyy
     for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(s, fmt).date()
         except Exception:
             pass
 
-    # fallback: pandas
     try:
         dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
         if pd.isna(dt):
@@ -151,13 +143,6 @@ def try_parse_date(v) -> date | None:
 
 
 def update_color(updated_at_value) -> tuple[str, str]:
-    """
-    Возвращает (цвет, подпись) по светофору:
-    1–7 дней: green
-    8–14: yellow
-    >14: red
-    нет даты: gray
-    """
     d = try_parse_date(updated_at_value)
     if not d:
         return "gray", "—"
@@ -173,33 +158,28 @@ def money_fmt(v) -> str:
     s = safe_text(v, fallback="—")
     if s == "—":
         return s
-    # попытка нормализовать число
     try:
         x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
         x = float(x)
         return f"{x:,.2f}".replace(",", " ").replace(".00", "") + " ₽"
     except Exception:
-        # если это уже текст с ₽ — просто вернём
-        return s if "₽" in s or "руб" in s.lower() else f"{s} ₽"
-
-
-def num_fmt(v) -> str:
-    s = safe_text(v, fallback="—")
-    if s == "—":
-        return s
-    try:
-        x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
-        x = float(x)
-        if x.is_integer():
-            return f"{int(x):,}".replace(",", " ")
-        return f"{x:,.2f}".replace(",", " ")
-    except Exception:
-        return s
+        return s if ("₽" in s or "руб" in s.lower()) else f"{s} ₽"
 
 
 def date_fmt(v) -> str:
     d = try_parse_date(v)
     return d.strftime("%d.%m.%Y") if d else "—"
+
+
+def ensure_url(s: str) -> str:
+    """Оставляем только рабочие http(s) URL. Иначе возвращаем пустую строку."""
+    x = safe_text(s, fallback="")
+    if not x or x == "—":
+        return ""
+    x = x.strip()
+    if re.match(r"^https?://", x, flags=re.I):
+        return x
+    return ""
 
 
 # =============================
@@ -224,11 +204,11 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
-    # fallback local
+    # fallback local xlsx
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
-            "РЕЕСТР_объектов_Курская_область_2025-2028 (17).xlsx",
+            "РЕЕСТР_объектов_Курская_область_2025-2028 (18).xlsx",
             "registry.xlsx",
             "data.xlsx",
         ]
@@ -250,17 +230,10 @@ def load_data() -> pd.DataFrame:
 
 def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Единая схема колонок (минимум для карточки + паспортные поля):
+    Минимальная единая схема для карточек:
     id, sector, district, name, object_type, address, responsible, status,
-    work_flag, issues, updated_at, card_url, folder_url,
-    state_program, federal_project, regional_program,
-    agreement, agreement_date, agreement_amount,
-    capacity_seats, area_m2, target_deadline,
-    design, psd_cost, designer,
-    expertise, expertise_conclusion, expertise_date,
-    rns, rns_date, rns_expiry,
-    contract, contract_date, contractor, contract_price,
-    end_date_plan, end_date_fact, readiness, paid
+    work_flag, issues, updated_at, card_url_text
+    + паспортные поля (как у вас было).
     """
     if df.empty:
         return df
@@ -270,8 +243,8 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame()
 
+    # БАЗОВЫЕ
     out["id"] = df[col("id", "ID")] if col("id", "ID") else ""
-
     out["sector"] = df[col("sector", "отрасль")] if col("sector", "отрасль") else ""
     out["district"] = df[col("district", "район")] if col("district", "район") else ""
     out["name"] = df[col("name", "object_name", "наименование_объекта", "наименование объекта", "объект")] if col(
@@ -291,14 +264,12 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "updated_at", "last_update", "обновлено", "updated"
     ) else ""
 
-    out["card_url"] = df[col("card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")] if col(
-        "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку"
-    ) else ""
-    out["folder_url"] = df[col("folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку")] if col(
-        "folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку"
+    # ВАЖНО: URL КАРТОЧКИ — ИЗ card_url_text (в вашем реестре там ссылка)
+    out["card_url_text"] = df[col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")] if col(
+        "card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку"
     ) else ""
 
-    # Паспортные поля
+    # ПАСПОРТНЫЕ ПОЛЯ
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
         "state_program", "гп", "государственная программа"
     ) else ""
@@ -356,12 +327,8 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "contract_price", "цена контракта", "стоимость контракта"
     ) else ""
 
-    out["end_date_plan"] = df[col("end_date_plan", "окончание план")] if col(
-        "end_date_plan", "окончание план"
-    ) else ""
-    out["end_date_fact"] = df[col("end_date_fact", "окончание факт")] if col(
-        "end_date_fact", "окончание факт"
-    ) else ""
+    out["end_date_plan"] = df[col("end_date_plan", "окончание план")] if col("end_date_plan", "окончание план") else ""
+    out["end_date_fact"] = df[col("end_date_fact", "окончание факт")] if col("end_date_fact", "окончание факт") else ""
     out["readiness"] = df[col("readiness", "готовность")] if col("readiness", "готовность") else ""
     out["paid"] = df[col("paid", "оплачено")] if col("paid", "оплачено") else ""
 
@@ -373,14 +340,13 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# THEME-AWARE STYLES (Light/Dark)
+# STYLES
 # =============================
 crest_b64 = read_local_crest_b64()
 
 st.markdown(
     """
 <style>
-/* --------- Theme tokens (default light) --------- */
 :root{
   --bg: #f7f8fb;
   --card: #ffffff;
@@ -395,8 +361,6 @@ st.markdown(
   --btn-bd: rgba(15,23,42,.12);
   --hr: rgba(15,23,42,.12);
 }
-
-/* Prefer system dark */
 @media (prefers-color-scheme: dark){
   :root{
     --bg: #0b1220;
@@ -413,8 +377,6 @@ st.markdown(
     --hr: rgba(255,255,255,.14);
   }
 }
-
-/* Streamlit containers */
 .block-container { padding-top: 24px !important; max-width: 1200px; }
 @media (max-width: 1200px){ .block-container { max-width: 96vw; } }
 div[data-testid="stHorizontalBlock"]{ gap: 14px; }
@@ -427,7 +389,7 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--bg) !important;
 }
 
-/* --------- HERO (как было, но читабельно в dark тоже) --------- */
+/* HERO */
 .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 14px; }
 .hero{
   width: 100%;
@@ -492,7 +454,7 @@ html, body, [data-testid="stAppViewContainer"]{
   .hero-row{ align-items:center; }
 }
 
-/* --------- CARD (компактная шапка + expander) --------- */
+/* CARD */
 .card{
   background: var(--card);
   border: 1px solid var(--border);
@@ -502,10 +464,34 @@ html, body, [data-testid="stAppViewContainer"]{
   margin-bottom: 14px;
   position: relative;
 }
-.card[data-accent="green"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(34,197,94,.55); }
-.card[data-accent="yellow"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(245,158,11,.55); }
-.card[data-accent="red"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(239,68,68,.55); }
-.card[data-accent="blue"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(59,130,246,.45); }
+.card[data-accent="green"]{
+  border-color: rgba(34,197,94,.45);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(34,197,94,.18),
+    inset 7px 0 0 rgba(34,197,94,.65);
+}
+.card[data-accent="yellow"]{
+  border-color: rgba(245,158,11,.45);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(245,158,11,.18),
+    inset 7px 0 0 rgba(245,158,11,.65);
+}
+.card[data-accent="red"]{
+  border-color: rgba(239,68,68,.45);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(239,68,68,.18),
+    inset 7px 0 0 rgba(239,68,68,.65);
+}
+.card[data-accent="blue"]{
+  border-color: rgba(59,130,246,.40);
+  box-shadow:
+    0 10px 22px var(--shadow),
+    -10px 0 26px rgba(59,130,246,.16),
+    inset 7px 0 0 rgba(59,130,246,.55);
+}
 
 .card-title{
   font-size: 20px;
@@ -599,12 +585,6 @@ html, body, [data-testid="stAppViewContainer"]{
   pointer-events:none;
 }
 
-.hr-soft{
-  margin-top: 12px;
-  border-top: 1px dashed var(--hr);
-  opacity: .9;
-}
-
 .section{
   margin-top: 12px;
   padding: 12px;
@@ -666,7 +646,7 @@ st.markdown(
       <div class="hero-titles">
         <div class="hero-ministry">Министерство восстановления, развития приграничья и строительства Курской области</div>
         <div class="hero-app">Реестр объектов</div>
-        <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку/папку.</div>
+        <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку.</div>
       </div>
     </div>
   </div>
@@ -723,7 +703,7 @@ if raw.empty:
 
 df = normalize_schema(raw)
 
-# unique lists
+# Списки фильтров
 sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
 districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()])
 statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
@@ -793,8 +773,8 @@ def render_card(row: pd.Series):
     work_flag = safe_text(row.get("work_flag", ""), fallback="—")
     issues = safe_text(row.get("issues", ""), fallback="—")
 
-    card_url = safe_text(row.get("card_url", ""), fallback="")
-    folder_url = safe_text(row.get("folder_url", ""), fallback="")
+    # URL КАРТОЧКИ — строго из card_url_text
+    card_url = ensure_url(row.get("card_url_text", ""))
 
     # Цвета
     accent = status_accent(status)
@@ -826,19 +806,14 @@ def render_card(row: pd.Series):
     elif u_col == "red":
         u_tag = "tag-red"
 
-    # кнопки
+    # кнопка (ОДНА)
     btn_card = (
-        f'<a class="a-btn" href="{card_url}" target="_blank">📄 Открыть карточку</a>'
-        if card_url and card_url != "—"
+        f'<a class="a-btn" href="{card_url}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
+        if card_url
         else '<span class="a-btn disabled">📄 Открыть карточку</span>'
     )
-    btn_folder = (
-        f'<a class="a-btn" href="{folder_url}" target="_blank">📁 Открыть папку</a>'
-        if folder_url and folder_url != "—"
-        else '<span class="a-btn disabled">📁 Открыть папку</span>'
-    )
 
-    # ШАПКА карточки (компактно)
+    # ШАПКА карточки
     st.markdown(
         f"""
 <div class="card" data-accent="{accent}">
@@ -862,14 +837,13 @@ def render_card(row: pd.Series):
 
   <div class="card-actions">
     {btn_card}
-    {btn_folder}
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    # РАСКРЫВАЕМЫЙ ПАСПОРТ (чтобы не было громоздко)
+    # ПАСПОРТ (свернут по умолчанию)
     exp_label = "📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть"
     with st.expander(exp_label, expanded=False):
         # Проблемные вопросы
@@ -896,14 +870,8 @@ def render_card(row: pd.Series):
 
         # Параметры
         st.markdown('<div class="section"><div class="section-title">📦 Параметры</div>', unsafe_allow_html=True)
-        cap = safe_text(row.get("capacity_seats", ""), "—")
-        area = safe_text(row.get("area_m2", ""), "—")
-        if cap != "—":
-            cap = f"{cap}"
-        if area != "—":
-            area = f"{area}"
-        render_kv("Мощность", cap)
-        render_kv("Площадь", area)
+        render_kv("Мощность", safe_text(row.get("capacity_seats", ""), "—"))
+        render_kv("Площадь", safe_text(row.get("area_m2", ""), "—"))
         render_kv("Целевой срок", date_fmt(row.get("target_deadline", "")))
         st.markdown("</div>", unsafe_allow_html=True)
 
