@@ -271,7 +271,7 @@ def build_row_search_blob(row: pd.Series) -> str:
 # =============================
 # DATA LOADING
 # =============================
-@st.cache_data(show_spinner=False, ttl=120)  # TTL = 2 минуты (для синхронизации без кнопки)
+@st.cache_data(show_spinner=False, ttl=120)  # 2 мин: авто-подтяжка без кнопки
 def load_data() -> pd.DataFrame:
     csv_url = None
     try:
@@ -405,7 +405,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES
+# STYLES (фикс мобильных цветов + убрать "пустой блок")
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -414,15 +414,12 @@ st.markdown(
 <style>
 :root{
   --text: #0f172a;
-  --muted: rgba(15,23,42,.68);
-
-  /* фон страницы */
+  --muted: rgba(15,23,42,.70);
   --page: radial-gradient(1100px 520px at 24% 18%, rgba(59,130,246,.08), rgba(0,0,0,0) 56%),
           radial-gradient(900px 480px at 78% 22%, rgba(16,185,129,.07), rgba(0,0,0,0) 56%),
           linear-gradient(180deg, #f6f8fc, #eef2f7);
-
   --border: rgba(15,23,42,.14);
-  --border-strong: rgba(15,23,42,.18);
+  --border-strong: rgba(15,23,42,.20);
   --shadow: rgba(0,0,0,.07);
 
   --chip-bg: rgba(15,23,42,.05);
@@ -446,6 +443,22 @@ header {visibility: hidden;}
 
 html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
+}
+
+/* ----------------------------
+   ВАЖНО: фикс белого/бледного текста на мобильном
+---------------------------- */
+html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
+  color: var(--text);
+}
+p, span, li, div, small { color: var(--text); }
+.stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
+label, [data-testid="stWidgetLabel"] *{
+  color: var(--text) !important;
+  opacity: 1 !important;
+}
+h1,h2,h3,h4,h5,h6{
+  color: var(--text) !important;
 }
 
 /* HERO */
@@ -483,29 +496,26 @@ html, body, [data-testid="stAppViewContainer"]{
   filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
 }
 .hero-titles{ flex: 1 1 auto; min-width: 0; }
-.hero-ministry{ color: rgba(255,255,255,.95); font-weight: 900; font-size: 20px; line-height: 1.15; }
-.hero-app{ margin-top: 6px; color: rgba(255,255,255,.92); font-weight: 800; font-size: 16px; }
-.hero-sub{ margin-top: 6px; color: rgba(255,255,255,.78); font-size: 13px; }
+.hero-ministry{ color: rgba(255,255,255,.95) !important; font-weight: 900; font-size: 20px; line-height: 1.15; }
+.hero-app{ margin-top: 6px; color: rgba(255,255,255,.92) !important; font-weight: 800; font-size: 16px; }
+.hero-sub{ margin-top: 6px; color: rgba(255,255,255,.78) !important; font-size: 13px; }
 @media (max-width: 900px){
   .hero-ministry{ font-size: 16px; }
   .hero-row{ align-items:center; }
 }
 
-/* Панель фильтров (контур + фон + тень) */
-.filters-panel{
+/* Виджеты фильтров/поиска/пароля — делаем визуально "панельными" без HTML-обёртки */
+div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
+  background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
   border: 1px solid rgba(15,23,42,.16);
   border-radius: 16px;
-  padding: 12px 12px 8px 12px;
-  background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
+  padding: 10px 10px 6px 10px;
   box-shadow: 0 14px 26px rgba(0,0,0,.08);
-  backdrop-filter: blur(6px);
-  margin-bottom: 8px;
 }
 
-/* поля ввода/селекты/поиск/пароль — контур и тень */
+/* Сами поля внутри */
 div[data-testid="stTextInput"] input,
-div[data-testid="stSelectbox"] div[role="combobox"],
-div[data-testid="stTextInput"] div[role="textbox"]{
+div[data-testid="stSelectbox"] div[role="combobox"]{
   border: 1px solid var(--border-strong) !important;
   box-shadow: 0 10px 18px rgba(0,0,0,.06) !important;
   background: rgba(255,255,255,.96) !important;
@@ -551,19 +561,19 @@ div[data-testid="stTextInput"] div[role="textbox"]{
               0 0 18px rgba(59,130,246,.10);
 }
 
-.card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; color: var(--text); }
+.card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; color: var(--text) !important; }
 .card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 10px; }
 .chip{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px; color: var(--text);
+  font-size: 13px; color: var(--text) !important;
 }
 
 .card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin-top: 6px; }
-.card-item{ font-size: 14px; color: var(--text); }
-.card-item b{ color: var(--text); }
+.card-item{ font-size: 14px; color: var(--text) !important; }
+.card-item b{ color: var(--text) !important; }
 
 .card-tags{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .tag{
@@ -571,7 +581,7 @@ div[data-testid="stTextInput"] div[role="textbox"]{
   padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px; color: var(--text); font-weight: 800;
+  font-size: 13px; color: var(--text) !important; font-weight: 800;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
@@ -618,7 +628,7 @@ div[data-testid="stTextInput"] div[role="textbox"]{
   cursor: pointer;
   padding: 12px 12px;
   font-weight: 900;
-  color: var(--text);
+  color: var(--text) !important;
   display:flex;
   align-items:center;
   gap: 10px;
@@ -657,24 +667,24 @@ div[data-testid="stTextInput"] div[role="textbox"]{
   border: 1px solid rgba(15,23,42,.12);
   background: var(--soft);
 }
-.section-title{ font-weight: 900; color: var(--text); margin-bottom: 8px; font-size: 14px; }
+.section-title{ font-weight: 900; color: var(--text) !important; margin-bottom: 8px; font-size: 14px; }
 .row{
   display:flex;
   gap: 10px;
   flex-wrap: wrap;
-  color: var(--text);
+  color: var(--text) !important;
   font-size: 13.5px;
   line-height: 1.35;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
-.row b{ color: var(--text); }
-.row .muted{ color: var(--muted); }
+.row b{ color: var(--text) !important; }
+.row .muted{ color: var(--muted) !important; }
 
 .issue-box{
   border: 1px solid rgba(239,68,68,.22);
   background: rgba(239,68,68,.07);
-  color: var(--text);
+  color: var(--text) !important;
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 13.5px;
@@ -698,7 +708,7 @@ div[data-testid="stTextInput"] div[role="textbox"]{
   border-radius: 999px;
   border: 1px solid rgba(15,23,42,.18);
   background: rgba(255,255,255,.92);
-  color: var(--text);
+  color: var(--text) !important;
   font-weight: 900;
   display:flex;
   align-items:center;
@@ -813,10 +823,9 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS + SEARCH (IN PANEL)
+# FILTERS + SEARCH
+# (ВАЖНО: никаких HTML-обёрток — чтобы не появлялся "пустой блок")
 # =============================
-st.markdown('<div class="filters-panel">', unsafe_allow_html=True)
-
 c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
     sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
@@ -826,8 +835,6 @@ with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 with c4:
     q = st.text_input("🔎 Поиск", value="", key="f_search", placeholder="").strip()
-
-st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =============================
