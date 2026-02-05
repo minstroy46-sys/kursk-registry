@@ -74,7 +74,7 @@ def extract_url(value: str) -> str:
         return ""
     matches = re.findall(r'https?://[^\s")]+', s)
     if not matches:
-        return s
+        return s.strip()
     for m in matches:
         if "docs.google.com/spreadsheets" in m:
             return m
@@ -506,7 +506,7 @@ html, body, [data-testid="stAppViewContainer"]{
 }
 
 .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 0; }
-.hero{
+hero{
   width: 100%;
   border-radius: 18px;
   padding: 18px 18px;
@@ -764,7 +764,7 @@ html, body, [data-testid="stAppViewContainer"]{
   border-radius: 16px;
   padding: 12px 14px;
   box-shadow: 0 8px 18px var(--shadow);
-  margin-top: -4px;
+  margin-top: -12px;
   margin-bottom: 10px;
 }
 div[data-testid="stSelectbox"] > div,
@@ -937,8 +937,8 @@ def render_card(row: pd.Series):
     work_flag = safe_text(row.get("work_flag", ""), fallback="—")
     issues = safe_text(row.get("issues", ""), fallback="—")
 
-    card_url = extract_url(row.get("card_url", ""))
-    folder_url = extract_url(row.get("folder_url", ""))
+    card_url = extract_url(row.get("card_url", "")).strip()
+    folder_url = extract_url(row.get("folder_url", "")).strip()
 
     accent = status_accent(status)
     w_col = works_color(work_flag)
@@ -968,8 +968,8 @@ def render_card(row: pd.Series):
     elif u_col == "red":
         u_tag = "tag-red"
 
-    link_url = card_url if card_url and str(card_url).startswith("http") else folder_url
-    if link_url and link_url != "—" and str(link_url).startswith("http"):
+    link_url = card_url if card_url and card_url.startswith("http") else folder_url
+    if link_url and link_url != "—" and link_url.startswith("http"):
         btn_card = f'<a class="a-btn" href="{link_url}" target="_blank" rel="noopener">📄 Открыть карточку</a>'
     else:
         btn_card = '<span class="a-btn disabled">📄 Открыть карточку</span>'
@@ -1077,6 +1077,7 @@ def render_card(row: pd.Series):
   {section("⏳ Сроки / финансы", timeline_block)}
   <div class="passport-hint">
     <button type="button" class="passport-btn" onclick="this.closest('details').open=false">⬆️ Свернуть паспорт</button>
+    <div>или нажмите заголовок паспорта ещё раз</div>
   </div>
 </details>
 """
