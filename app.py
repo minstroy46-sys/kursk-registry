@@ -826,4 +826,214 @@ if sector_sel != "Все":
 if district_sel != "Все":
     filtered = filtered[filtered["district"].astype(str) == str(district_sel)]
 if status_sel != "Все":
-    filtered = fi
+    filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
+
+qn = norm_search(q)
+if qn:
+    tokens = expand_query_tokens(qn)
+
+    def match_blob(blob: str) -> bool:
+        for t in tokens:
+            if t and t not in blob:
+                return False
+        return True
+
+    filtered = filtered[filtered["search_blob"].apply(match_blob)]
+
+st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
+st.divider()
+
+
+# =============================
+# CARD RENDER (HTML)
+# =============================
+def tag_class(color: str) -> str:
+    if color == "green":
+        return "tag-green"
+    if color == "yellow":
+        return "tag-yellow"
+    if color == "red":
+        return "tag-red"
+    return "tag-gray"
+
+
+def kv_html(label: str, value) -> str:
+    return f'<div class="row"><b>{esc(label)}:</b> {esc(value)}</div>'
+
+
+def section_html(title: str, inner_html: str, wide: bool = False) -> str:
+    cls = "section section-wide" if wide else "section"
+    return f'<div class="{cls}"><div class="section-title">{esc(title)}</div>{inner_html}</div>'
+
+
+def render_card(row: pd.Series):
+    title_txt = safe_text(row.get("name", "Объект"))
+    title = esc(title_txt)
+    sector = esc(row.get("sector", "—"))
+    district = esc(row.get("district", "—"))
+    address = esc(row.get("address", "—"))
+    responsible = esc(row.get("responsible", "—"))
+
+    status = safe_text(row.get("status", ""), "—")
+    work_flag = safe_text(row.get("work_flag", ""), "—")
+    issues = safe_text(row.get("issues", ""), "—")
+
+    accent = status_accent(status)
+    w_col = works_color(work_flag)
+    u_col, u_txt = update_color(row.get("updated_at", ""))
+
+    s_cls = tag_class(accent)
+    w_cls = tag_class(w_col)
+    u_cls = tag_class(u_col)
+
+    card_url = ensure_url(row.get("card_url_text", ""))
+
+    btn_html = (
+        f'<a class="a-btn" href="{esc(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
+        if card_url
+        else '<span class="a-btn disabled">📄 Открыть карточку</span>'
+    )
+
+    issues_html = (
+        f'<div class="issue-box">{esc(issues)}</div>'
+        if issues != "—"
+        else '<div class="row"><span class="muted">—</span></div>'
+    )
+
+    passport_blocks = []
+    passport_blocks.append(section_html("⚠️ Проблемные вопросы", issues_html, wide=True))
+
+    prog = (
+        kv_html("ГП/СП", row.get("state_program", "—"))
+        + kv_html("ФП", row.get("federal_project", "—"))
+        + kv_html("РП", row.get("regional_program", "—"))
+    )
+    passport_blocks.append(section_html("🏛️ Программы", prog))
+
+    agr = (
+        kv_html("№", row.get("agreement", "—"))
+        + kv_html("Дата", date_fmt(row.get("agreement_date", "")))
+        + kv_html("Сумма", money_fmt(row.get("agreement_amount", "")))
+    )
+    passport_blocks.append(section_html("🧾 Соглашение", agr))
+
+    params = (
+        kv_html("Мощность", row.get("capacity_seats", "—"))
+        + kv_html("Площадь", row.get("area_m2", "—"))
+        + kv_html("Целевой срок", date_fmt(row.get("target_deadline", "")))
+    )
+    passport_blocks.append(section_html("📦 Параметры", params))
+
+    psd = (
+        kv_html("ПСД", row.get("design", "—"))
+        + kv_html("Стоимость ПСД", money_fmt(row.get("psd_cost", "")))
+        + kv_html("Проектировщик", row.get("designer", "—"))
+        + kv_html("Экспертиза", row.get("expertise", "—"))
+        + kv_html("Дата экспертизы", date_fmt(row.get("expertise_date", "")))
+        + kv_html("Заключение", row.get("expertise_conclusion", "—"))
+    )
+    passport_blocks.append(section_html("🗂️ ПСД / Экспертиза", psd))
+
+    rns_block = (
+        kv_html("№ РНС", row.get("rns", "—"))
+        + kv_html("Дата", date_fmt(row.get("rns_date", "")))
+        + kv_html("Срок действия", date_fmt(row.get("rns_expiry", "")))
+    )
+    passport_blocks.append(section_html("🏗️ РНС", rns_block))
+
+    contr = (
+        kv_html("№", row.get("contract", "—"))
+        + kv_html("Дата", date_fmt(row.get("contract_date", "")))
+        + kv_html("Подрядчик", row.get("contractor", "—"))
+        + kv_html("Цена", money_fmt(row.get("contract_price", "")))
+    )
+    passport_blocks.append(section_html("🧩 Контракт", contr))
+
+    terms = (
+        kv_html("Окончание (план)", date_fmt(row.get("end_date_plan", "")))
+        + kv_html("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))
+        + kv_html("Готовность", readiness_fmt(row.get("readiness", "")))
+        + kv_html("Оплачено", money_fmt(row.get("paid", "")))
+    )
+    passport_blocks.append(section_html("⏳ Сроки / финансы", terms))
+
+    rid = safe_text(row.get("id", ""), fallback="").strip()
+    if not rid:
+        rid = f"row_{abs(hash(title_txt))}"
+    rid = re.sub(r"[^a-zA-Z0-9_]+", "_", rid)
+    toggle_id = f"passport_{rid}"
+
+    passport_html = dedent(
+        f"""
+        <div class="passport">
+          <input class="passport-toggle" type="checkbox" id="{toggle_id}">
+          <label class="passport-summary" for="{toggle_id}">📋 Паспорт объекта и контрольные показатели</label>
+
+          <div class="passport-body">
+            <div class="passport-grid">
+              {''.join(passport_blocks)}
+            </div>
+            <div class="passport-close">
+              <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>
+            </div>
+          </div>
+        </div>
+        """
+    )
+
+    info_html = dedent(
+        f"""
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="ico">🗺️</div>
+            <div class="itxt">
+              <div class="ilbl">Адрес</div>
+              <div class="ival">{address}</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="ico">👤</div>
+            <div class="itxt">
+              <div class="ilbl">Ответственный</div>
+              <div class="ival">{responsible}</div>
+            </div>
+          </div>
+        </div>
+        """
+    )
+
+    card_html = dedent(
+        f"""
+        <div class="card" data-accent="{esc(accent)}">
+          <div class="card-head">
+            <div class="card-title">{title}</div>
+
+            <div class="card-subchips">
+              <span class="chip">🏷️ {sector}</span>
+              <span class="chip">📍 {district}</span>
+            </div>
+
+            {info_html}
+
+            <div class="card-tags">
+              <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
+              <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
+              <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
+            </div>
+
+            {btn_html}
+
+            {passport_html}
+          </div>
+        </div>
+        """
+    )
+
+    st.markdown(card_html, unsafe_allow_html=True)
+
+
+# =============================
+# OUTPUT
+# =============================
+for _, r in filtered.iterrows():
+    render_card(r)
