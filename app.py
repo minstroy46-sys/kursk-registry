@@ -394,8 +394,9 @@ st.markdown(
 
 /* Если у пользователя тёмная тема системы — всё равно держим проект светлым */
 html, body, [data-testid="stAppViewContainer"]{
-  background: var(--bg) !important;
+  background: #f7f8fb !important;
 }
+
 
 .block-container { padding-top: 24px !important; max-width: 1200px; }
 @media (max-width: 1200px){ .block-container { max-width: 96vw; } }
@@ -472,22 +473,46 @@ header {visibility: hidden;}
 
 /* --------- CARD (обновляем ТОЛЬКО внутри карточки) --------- */
 .card{
+  background: linear-gradient(180deg, #ffffff, #f4f7ff);
+  border: 1px solid rgba(15,23,42,.12);
   border-radius: 16px;
   padding: 16px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.06);
   margin-bottom: 14px;
-  border: 1px solid var(--border);
-  background:
-    radial-gradient(900px 320px at 18% 10%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%),
-    radial-gradient(700px 240px at 92% 20%, rgba(16,185,129,.08), rgba(0,0,0,0) 55%),
-    linear-gradient(180deg, rgba(255,255,255,1), rgba(248,250,252,1));
-  box-shadow: 0 10px 22px var(--shadow);
+  position: relative;
 }
 
+
 /* Контур/акцент по статусу — мягко */
-.card[data-accent="green"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(34,197,94,.45); }
-.card[data-accent="yellow"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(245,158,11,.45); }
-.card[data-accent="red"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(239,68,68,.45); }
-.card[data-accent="blue"]{ box-shadow: 0 10px 22px var(--shadow), inset 6px 0 0 rgba(59,130,246,.40); }
+.card[data-accent="green"]{
+  border-color: rgba(34,197,94,.35);
+  box-shadow:
+    0 10px 22px rgba(0,0,0,.06),
+    inset 10px 0 0 rgba(34,197,94,.55),
+    0 0 0 1px rgba(34,197,94,.10);
+}
+.card[data-accent="yellow"]{
+  border-color: rgba(245,158,11,.38);
+  box-shadow:
+    0 10px 22px rgba(0,0,0,.06),
+    inset 10px 0 0 rgba(245,158,11,.58),
+    0 0 0 1px rgba(245,158,11,.10);
+}
+.card[data-accent="red"]{
+  border-color: rgba(239,68,68,.38);
+  box-shadow:
+    0 10px 22px rgba(0,0,0,.06),
+    inset 10px 0 0 rgba(239,68,68,.58),
+    0 0 0 1px rgba(239,68,68,.10);
+}
+.card[data-accent="blue"]{
+  border-color: rgba(59,130,246,.32);
+  box-shadow:
+    0 10px 22px rgba(0,0,0,.06),
+    inset 10px 0 0 rgba(59,130,246,.52),
+    0 0 0 1px rgba(59,130,246,.10);
+}
+
 
 .card-title{
   font-size: 20px;
@@ -592,12 +617,13 @@ header {visibility: hidden;}
 }
 
 .section{
-  margin-top: 10px;
-  padding: 10px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,.75);
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15,23,42,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(248,250,252,.95));
 }
+
 .section-title{
   font-weight: 900;
   color: var(--text);
@@ -1412,13 +1438,13 @@ label{ color: rgba(255,255,255,.78) !important; font-weight: 800 !important; }
 
 /* Expander внутри карточки (важно!) */
 .card div[data-testid="stExpander"]{
-  margin-top: 10px;
+  margin-top: 12px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(15,23,42,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.85), rgba(248,250,252,.85));
 }
-.card div[data-testid="stExpander"] details{
-  background: transparent !important;
+.card div[data-testid="stExpander"] .streamlit-expanderContent{
+  border-top: 1px dashed rgba(15,23,42,.12) !important;
 }
 .card div[data-testid="stExpander"] summary{
   color: var(--text) !important;
