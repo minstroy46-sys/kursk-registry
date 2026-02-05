@@ -212,8 +212,7 @@ def norm_search(s: str) -> str:
     return s
 
 
-# --- КЛЮЧ: убираем лидирующие пробелы у каждой строки HTML,
-# чтобы Streamlit не превращал в Markdown-code block
+# --- Streamlit иногда превращает строки с отступом в markdown-code: убираем отступы
 def html_clean(s: str) -> str:
     if s is None:
         return ""
@@ -239,7 +238,6 @@ def drive_image_url(url: str, width: int = 1200) -> str:
     fid = extract_drive_file_id(url)
     if not fid:
         return ""
-    # thumbnail обычно работает стабильнее для картинок
     return f"https://drive.google.com/thumbnail?id={fid}&sz=w{int(width)}"
 
 
@@ -377,7 +375,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
 
-    # --- ФОТО
     out["photo_url"] = df[col("photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото")] if col(
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
@@ -604,43 +601,91 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   font-weight: 800;
 }
 
-/* ФОТО В КАРТОЧКЕ */
+/* Фото: меньше + аккуратная рамка в стиле карточек */
 .photo-wrap{
   width: 100%;
   border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.12);
-  background: rgba(255,255,255,.85);
+  border: 1px solid rgba(15,23,42,.14);
+  background:
+    radial-gradient(900px 260px at 18% 18%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%),
+    radial-gradient(900px 260px at 86% 26%, rgba(16,185,129,.08), rgba(0,0,0,0) 55%),
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,255,.98));
   overflow: hidden;
-  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+  box-shadow: 0 12px 22px rgba(0,0,0,.08);
   margin: 10px 0 14px 0;
+  padding: 8px;
+}
+.photo-inner{
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(15,23,42,.12);
+  background: rgba(255,255,255,.90);
 }
 .photo{
   display:block;
   width:100%;
-  height:auto;
-  aspect-ratio: 16 / 9;    /* фиксируем, чтобы ничего не "плыло" */
+  height: 210px;          /* меньше */
   object-fit: cover;
 }
 @media (max-width: 900px){
-  .photo{ aspect-ratio: 4 / 3; }
+  .photo{ height: 170px; }
 }
 
-.card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin-top: 8px; }
-.card-item{ font-size: 14px; color: var(--text) !important; }
-.card-item b{ color: var(--text) !important; }
+/* Адрес отдельной строкой */
+.addr-row{
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text) !important;
+}
+.addr-row b{ color: var(--text) !important; }
 
-.card-tags{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+/* Теги + Ответственный в одной строке */
+.tags-row{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.tags-left{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .tag{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
-  border: 1px solid var(--chip-bd);
-  background: var(--chip-bg);
+  border: 1px solid rgba(15,23,42,.10);
+  background: rgba(15,23,42,.05);
   font-size: 13px; color: var(--text) !important; font-weight: 800;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
 .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
+
+.resp-chip{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(15,23,42,.12);
+  background: rgba(255,255,255,.78);
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--text) !important;
+  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+  white-space: nowrap; /* справа аккуратно */
+}
+.resp-chip .muted{
+  font-weight: 800;
+  color: rgba(15,23,42,.70) !important;
+}
+@media (max-width: 900px){
+  .resp-chip{ white-space: normal; }
+}
 
 /* Кнопка открыть карточку */
 .a-btn{
@@ -769,7 +814,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 }
 
 @media (max-width: 900px){
-  .card-grid{ grid-template-columns: 1fr; }
   .card-title{ font-size: 18px; }
   .passport-grid{ grid-template-columns: 1fr; }
 }
@@ -912,7 +956,7 @@ st.divider()
 
 
 # =============================
-# CARD RENDER (HTML)
+# CARD RENDER
 # =============================
 def tag_class(color: str) -> str:
     if color == "green":
@@ -939,7 +983,7 @@ def render_card(row: pd.Series):
     sector = esc(row.get("sector", "—"))
     district = esc(row.get("district", "—"))
     address = esc(row.get("address", "—"))
-    responsible = esc(row.get("responsible", "—"))
+    responsible = safe_text(row.get("responsible", ""), "—")
 
     status = safe_text(row.get("status", ""), "—")
     work_flag = safe_text(row.get("work_flag", ""), "—")
@@ -954,7 +998,7 @@ def render_card(row: pd.Series):
     u_cls = tag_class(u_col)
 
     card_url = ensure_url(row.get("card_url_text", ""))
-    photo_src = drive_image_url(row.get("photo_url", ""))  # <-- ФОТО
+    photo_src = drive_image_url(row.get("photo_url", ""))
 
     btn_html = html_clean(
         f'<a class="a-btn" href="{esc(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
@@ -967,7 +1011,9 @@ def render_card(row: pd.Series):
         photo_html = html_clean(
             f"""
 <div class="photo-wrap">
-  <img class="photo" src="{esc(photo_src)}" alt="Фото объекта" loading="lazy">
+  <div class="photo-inner">
+    <img class="photo" src="{esc(photo_src)}" alt="Фото объекта" loading="lazy">
+  </div>
 </div>
 """
         )
@@ -1058,6 +1104,13 @@ def render_card(row: pd.Series):
 """
     )
 
+    # Теги слева + ответственный справа (в одной строке)
+    resp_html = html_clean(
+        f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>'
+        if responsible and responsible != "—"
+        else '<span class="resp-chip"><span class="muted">👤 Ответственный:</span> —</span>'
+    )
+
     card_html = html_clean(
         f"""
 <div class="card" data-accent="{esc(accent)}">
@@ -1070,15 +1123,15 @@ def render_card(row: pd.Series):
 
   {photo_html}
 
-  <div class="card-grid">
-    <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
-    <div class="card-item">👤 <b>Ответственный:</b> {responsible}</div>
-  </div>
+  <div class="addr-row">🗺️ <b>Адрес:</b> {address}</div>
 
-  <div class="card-tags">
-    <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
-    <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
-    <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
+  <div class="tags-row">
+    <div class="tags-left">
+      <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
+      <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
+      <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
+    </div>
+    {resp_html}
   </div>
 
   {btn_html}
