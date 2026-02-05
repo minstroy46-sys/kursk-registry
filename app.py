@@ -1,8 +1,8 @@
 import base64
-import html
 import re
 from datetime import datetime, date
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -80,7 +80,7 @@ def status_accent(status_text: str) -> str:
         return "red"
     if "проектир" in s:
         return "yellow"
-    if "строитель" in s or "ведется" in s:
+    if "строитель" in s or "ввод" in s or "реконстр" in s:
         return "green"
     return "blue"
 
@@ -97,12 +97,6 @@ def works_color(work_flag: str) -> str:
 
 
 def try_parse_date(v) -> date | None:
-    """
-    Поддерживаем:
-    - datetime/date
-    - строки: dd.mm.yyyy / yyyy-mm-dd / etc.
-    - числа Google Sheets/Excel (серийные даты)
-    """
     if v is None:
         return None
     try:
@@ -120,7 +114,6 @@ def try_parse_date(v) -> date | None:
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
-    # Число как серийная дата
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
@@ -179,43 +172,43 @@ def readiness_fmt(v) -> str:
     s = safe_text(v, fallback="—")
     if s == "—":
         return "—"
-    # если уже содержит %
-    if "%" in s:
-        return s.strip()
     try:
-        x = float(str(s).replace(" ", "").replace("\u00A0", "").replace(",", "."))
-        # 0..1 -> проценты
-        if 0 <= x <= 1:
-            return f"{round(x * 100)}%"
-        # 1..100 -> уже проценты
-        if 1 < x <= 100:
-            return f"{round(x)}%"
-        # иначе как есть
-        return f"{x}"
+        x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
+        num = float(x)
+        # если 0..1 — считаем долей
+        if 0 <= num <= 1:
+            return f"{round(num * 100)}%"
+        # если 1..100 — считаем процентом
+        if 1 < num <= 100:
+            return f"{round(num)}%"
+        # если вдруг 0..1000 — просто вернем как есть
+        return f"{s}%"
     except Exception:
+        # если уже "38%" — оставим
         return s
 
 
-def normalize_url(u: str) -> str:
-    """Чтобы href не становился относительным (/card_0 и т.п.)."""
-    u = safe_text(u, fallback="").strip()
-    if not u or u == "—":
-        return ""
-    # убираем пробелы/кавычки
-    u = u.strip().strip('"').strip("'")
-    # если люди вставили без схемы
-    if u.startswith("www."):
-        u = "https://" + u
-    if u.startswith("docs.google.com") or u.startswith("drive.google.com"):
-        u = "https://" + u
-    # если вообще нет http/https — считаем битым
-    if not (u.startswith("http://") or u.startswith("https://")):
-        return ""
-    return u
+def is_http_url(s: str) -> bool:
+    if not s:
+        return False
+    s = s.strip()
+    return s.startswith("http://") or s.startswith("https://")
 
 
-def esc(s: str) -> str:
-    return html.escape(s, quote=True)
+def normalize_url(v) -> str:
+    s = safe_text(v, fallback="")
+    if s in ("—", ""):
+        return ""
+    s = s.strip()
+    # Иногда в таблице попадает текст вместо ссылки — отсекаем
+    if not is_http_url(s):
+        return ""
+    return s
+
+
+def make_hidden_unique_suffix(i: int) -> str:
+    # делает метку уникальной, но визуально почти не заметно
+    return "\u200b" * (i + 1)
 
 
 # =============================
@@ -240,6 +233,7 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
+    # fallback local
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -272,75 +266,85 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame()
 
-    # НЕ ПОКАЗЫВАЕМ id в интерфейсе, но оставляем как тех.ключ
     out["id"] = df[col("id", "ID")] if col("id", "ID") else ""
 
     out["sector"] = df[col("sector", "отрасль")] if col("sector", "отрасль") else ""
     out["district"] = df[col("district", "район")] if col("district", "район") else ""
-
     out["name"] = df[col("name", "object_name", "наименование_объекта", "наименование объекта", "объект")] if col(
         "name", "object_name", "наименование_объекта", "наименование объекта", "объект"
     ) else ""
-
-    # Сокращение/короткое имя (важно для поиска: ФАП/ОДКБ/ЦРБ и т.п.)
-    out["short_name"] = df[col("объект", "object", "short_name")] if col("объект", "object", "short_name") else ""
-
     out["object_type"] = df[col("object_type", "тип", "вид объекта")] if col("object_type", "тип", "вид объекта") else ""
     out["address"] = df[col("address", "адрес")] if col("address", "адрес") else ""
     out["responsible"] = df[col("responsible", "ответственный")] if col("responsible", "ответственный") else ""
     out["status"] = df[col("status", "статус")] if col("status", "статус") else ""
-    out["work_flag"] = df[col("work_flag", "работы", "работы_ведутся", "works_in_progress", "works")] if col(
-        "work_flag", "работы", "работы_ведутся", "works_in_progress", "works"
+    out["work_flag"] = df[col("work_flag", "работы", "works_in_progress", "works")] if col(
+        "work_flag", "работы", "works_in_progress", "works"
     ) else ""
-    out["issues"] = df[col("issues", "проблемы", "проблемные_вопросы", "проблемные вопросы")] if col(
-        "issues", "проблемы", "проблемные_вопросы", "проблемные вопросы"
+    out["issues"] = df[col("issues", "проблемы", "проблемные вопросы")] if col(
+        "issues", "проблемы", "проблемные вопросы"
     ) else ""
-    out["updated_at"] = df[col("updated_at", "last_update", "дата_последнего_обновления", "обновлено", "updated")] if col(
-        "updated_at", "last_update", "дата_последнего_обновления", "обновлено", "updated"
-    ) else ""
-
-    out["card_url"] = df[col("card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")] if col(
-        "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку"
+    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
+        "updated_at", "last_update", "обновлено", "updated"
     ) else ""
 
-    # folder_url сохраняем, но кнопку больше не показываем (по вашему ТЗ)
-    out["folder_url"] = df[col("folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку")] if col(
-        "folder_url", "ссылка_на_папку_(drive)", "ссылка на папку", "ссылка_на_папку"
+    # ВАЖНО: ссылки на карточку — у вас в реестре могли называться по-разному
+    out["card_url"] = df[
+        col(
+            "card_url",
+            "card url",
+            "card",
+            "карточка",
+            "ссылка на карточку",
+            "ссылка_на_карточку",
+            "ссылка_на_карточку_(google)",
+            "card_url_text",
+            "card url text",
+        )
+    ] if col(
+        "card_url",
+        "card url",
+        "card",
+        "карточка",
+        "ссылка на карточку",
+        "ссылка_на_карточку",
+        "ссылка_на_карточку_(google)",
+        "card_url_text",
+        "card url text",
     ) else ""
 
     # Паспортные поля
-    out["state_program"] = df[col("state_program", "госпрограмма", "гп", "государственная программа")] if col(
-        "state_program", "госпрограмма", "гп", "государственная программа"
+    out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
+        "state_program", "гп", "государственная программа"
     ) else ""
-    out["federal_project"] = df[col("federal_project", "федеральный_проект", "фп", "федеральный проект")] if col(
-        "federal_project", "федеральный_проект", "фп", "федеральный проект"
+    out["federal_project"] = df[col("federal_project", "фп", "федеральный проект")] if col(
+        "federal_project", "фп", "федеральный проект"
     ) else ""
-    out["regional_program"] = df[col("regional_program", "региональная_программа", "рп", "региональная программа")] if col(
-        "regional_program", "региональная_программа", "рп", "региональная программа"
+    out["regional_program"] = df[col("regional_program", "рп", "региональная программа")] if col(
+        "regional_program", "рп", "региональная программа"
     ) else ""
 
     out["agreement"] = df[col("agreement", "соглашение", "номер соглашения")] if col(
         "agreement", "соглашение", "номер соглашения"
     ) else ""
-    out["agreement_date"] = df[col("agreement_date", "дата_соглашения", "дата соглашения")] if col(
-        "agreement_date", "дата_соглашения", "дата соглашения"
+    out["agreement_date"] = df[col("agreement_date", "дата соглашения")] if col(
+        "agreement_date", "дата соглашения"
     ) else ""
-    out["agreement_amount"] = df[col("agreement_amount", "сумма_соглашения", "сумма соглашения")] if col(
-        "agreement_amount", "сумма_соглашения", "сумма соглашения"
+    out["agreement_amount"] = df[col("agreement_amount", "сумма соглашения")] if col(
+        "agreement_amount", "сумма соглашения"
     ) else ""
 
-    out["capacity_seats"] = df[col("capacity_seats", "мощность (мест)", "мощность", "мест", "посещений")] if col(
-        "capacity_seats", "мощность (мест)", "мощность", "мест", "посещений"
+    out["capacity_seats"] = df[col("capacity_seats", "мощность", "мест", "посещений")] if col(
+        "capacity_seats", "мощность", "мест", "посещений"
     ) else ""
     out["area_m2"] = df[col("area_m2", "площадь", "м2", "кв.м")] if col(
         "area_m2", "площадь", "м2", "кв.м"
     ) else ""
-    out["target_deadline"] = df[col("target_deadline", "срок_достижения результата", "целевой срок")] if col(
-        "target_deadline", "срок_достижения результата", "целевой срок"
+    out["target_deadline"] = df[col("target_deadline", "целевой срок")] if col(
+        "target_deadline", "целевой срок"
     ) else ""
 
     out["design"] = df[col("design", "проектирование", "псд")] if col("design", "проектирование", "псд") else ""
-    out["psd_cost"] = df[col("psd_cost", "стоимость_псд", "стоимость псд")] if col("psd_cost", "стоимость_псд", "стоимость псд") else ""
+    out["psd_cost"] = df[col("psd_cost", "стоимость псд")] if col("psd_cost", "стоимость псд") else ""
     out["designer"] = df[col("designer", "проектировщик")] if col("designer", "проектировщик") else ""
 
     out["expertise"] = df[col("expertise", "экспертиза")] if col("expertise", "экспертиза") else ""
@@ -352,8 +356,8 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     ) else ""
 
     out["rns"] = df[col("rns", "рнс")] if col("rns", "рнс") else ""
-    out["rns_date"] = df[col("rns_date", "дата рнс", "дата")] if col("rns_date", "дата рнс") else ""
-    out["rns_expiry"] = df[col("rns_expiry", "срок действия рнс", "срок_действия")] if col("rns_expiry", "срок действия рнс", "срок_действия") else ""
+    out["rns_date"] = df[col("rns_date", "дата рнс")] if col("rns_date", "дата рнс") else ""
+    out["rns_expiry"] = df[col("rns_expiry", "срок действия рнс")] if col("rns_expiry", "срок действия рнс") else ""
 
     out["contract"] = df[col("contract", "контракт", "номер контракта")] if col(
         "contract", "контракт", "номер контракта"
@@ -366,13 +370,12 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "contract_price", "цена контракта", "стоимость контракта"
     ) else ""
 
-    out["end_date_plan"] = df[col("end_date_plan", "срок окончания_план", "окончание план")] if col(
-        "end_date_plan", "срок окончания_план", "окончание план"
+    out["end_date_plan"] = df[col("end_date_plan", "окончание план")] if col(
+        "end_date_plan", "окончание план"
     ) else ""
-    out["end_date_fact"] = df[col("end_date_fact", "срок окончания_факт", "окончание факт")] if col(
-        "end_date_fact", "срок окончания_факт", "окончание факт"
+    out["end_date_fact"] = df[col("end_date_fact", "окончание факт")] if col(
+        "end_date_fact", "окончание факт"
     ) else ""
-
     out["readiness"] = df[col("readiness", "готовность")] if col("readiness", "готовность") else ""
     out["paid"] = df[col("paid", "оплачено")] if col("paid", "оплачено") else ""
 
@@ -391,39 +394,63 @@ st.markdown(
     """
 <style>
 :root{
-  --bg:#f7f8fb; --card:#ffffff; --text:#0f172a; --muted:rgba(15,23,42,.72);
-  --border:rgba(15,23,42,.12); --shadow:rgba(0,0,0,.07);
-  --chip-bg:rgba(15,23,42,.05); --chip-bd:rgba(15,23,42,.12);
-  --btn-bg:rgba(255,255,255,.96); --btn-bd:rgba(15,23,42,.14);
-  --soft-red:rgba(239,68,68,.10); --soft-red-bd:rgba(239,68,68,.22);
+  --bg:#f7f8fb;
+  --card:#ffffff;
+  --card2:rgba(15,23,42,.03);
+  --text:#0f172a;
+  --muted:rgba(15,23,42,.70);
+  --border:rgba(15,23,42,.12);
+  --shadow:rgba(0,0,0,.07);
+  --chip-bg:rgba(15,23,42,.05);
+  --chip-bd:rgba(15,23,42,.12);
+  --hr:rgba(15,23,42,.12);
+  --btn-bg:rgba(255,255,255,.96);
+  --btn-bd:rgba(15,23,42,.14);
 }
+
 @media (prefers-color-scheme: dark){
   :root{
-    --bg:#0b1220; --card:#111a2b; --text:rgba(255,255,255,.92); --muted:rgba(255,255,255,.70);
-    --border:rgba(255,255,255,.14); --shadow:rgba(0,0,0,.38);
-    --chip-bg:rgba(255,255,255,.06); --chip-bd:rgba(255,255,255,.14);
-    --btn-bg:rgba(17,26,43,.92); --btn-bd:rgba(255,255,255,.16);
-    --soft-red:rgba(239,68,68,.12); --soft-red-bd:rgba(239,68,68,.24);
+    --bg:#0b1220;
+    --card:#111a2b;
+    --card2:rgba(255,255,255,.05);
+    --text:rgba(255,255,255,.92);
+    --muted:rgba(255,255,255,.70);
+    --border:rgba(255,255,255,.14);
+    --shadow:rgba(0,0,0,.35);
+    --chip-bg:rgba(255,255,255,.06);
+    --chip-bd:rgba(255,255,255,.14);
+    --hr:rgba(255,255,255,.14);
+    --btn-bg:rgba(17,26,43,.92);
+    --btn-bd:rgba(255,255,255,.16);
   }
 }
+
 html, body, [data-testid="stAppViewContainer"]{ background:var(--bg) !important; }
-.block-container{ padding-top:18px !important; max-width:1200px; }
+.block-container{ padding-top:22px !important; max-width:1200px; }
 @media (max-width:1200px){ .block-container{ max-width:96vw; } }
 
-#MainMenu{visibility:hidden;} footer{visibility:hidden;} header{visibility:hidden;}
+#MainMenu, footer, header {visibility:hidden;}
 
-.hero-wrap{ width:100%; display:flex; justify-content:center; margin: 8px 0 10px; }
+/* HERO */
+.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom:10px; }
 .hero{
-  width:100%; border-radius:18px; padding:18px;
+  width:100%;
+  border-radius:18px;
+  padding:18px 18px;
   background: radial-gradient(1200px 380px at 22% 30%, rgba(60,130,255,.22), rgba(0,0,0,0) 55%),
               linear-gradient(135deg, #0b2a57, #1b4c8f);
   box-shadow:0 18px 34px rgba(0,0,0,.18);
-  position:relative; overflow:hidden;
+  position:relative;
+  overflow:hidden;
 }
 .hero:after{
-  content:""; position:absolute; inset:-40px -120px auto auto;
-  width:520px; height:320px; background:rgba(255,255,255,.08);
-  transform:rotate(14deg); border-radius:32px;
+  content:"";
+  position:absolute;
+  inset:-40px -120px auto auto;
+  width:520px; height:320px;
+  background:rgba(255,255,255,.08);
+  transform:rotate(14deg);
+  border-radius:32px;
 }
 .hero-row{ display:flex; align-items:flex-start; gap:16px; position:relative; z-index:2; }
 .hero-crest{
@@ -431,14 +458,18 @@ html, body, [data-testid="stAppViewContainer"]{ background:var(--bg) !important;
   background:rgba(255,255,255,.10);
   display:flex; align-items:center; justify-content:center;
   border:1px solid rgba(255,255,255,.16);
-  flex:0 0 auto;
 }
 .hero-crest img{ width:56px; height:56px; object-fit:contain; filter:drop-shadow(0 6px 10px rgba(0,0,0,.35)); }
 .hero-ministry{ color:rgba(255,255,255,.95); font-weight:900; font-size:20px; line-height:1.15; }
 .hero-app{ margin-top:6px; color:rgba(255,255,255,.92); font-weight:800; font-size:16px; }
 .hero-sub{ margin-top:6px; color:rgba(255,255,255,.78); font-size:13px; }
-@media (max-width:900px){ .hero-ministry{ font-size:16px; } .hero-row{ align-items:center; } }
 
+@media (max-width:900px){
+  .hero-ministry{ font-size:16px; }
+  .hero-row{ align-items:center; }
+}
+
+/* CARD */
 .card{
   background:var(--card);
   border:2px solid var(--border);
@@ -447,31 +478,41 @@ html, body, [data-testid="stAppViewContainer"]{ background:var(--bg) !important;
   box-shadow:0 10px 22px var(--shadow);
   margin-bottom:14px;
 }
-.card[data-accent="green"]{ border-color:rgba(34,197,94,.45); }
-.card[data-accent="yellow"]{ border-color:rgba(245,158,11,.50); }
-.card[data-accent="red"]{ border-color:rgba(239,68,68,.45); }
-.card[data-accent="blue"]{ border-color:rgba(59,130,246,.35); }
+.card.border-green{ border-color: rgba(34,197,94,.55); }
+.card.border-yellow{ border-color: rgba(245,158,11,.55); }
+.card.border-red{ border-color: rgba(239,68,68,.55); }
+.card.border-blue{ border-color: rgba(59,130,246,.45); }
 
-.card-title{
-  font-size:18px; line-height:1.2; font-weight:900; margin:0 0 10px 0; color:var(--text);
-  padding:10px 12px;
-  border-radius:12px;
+.title-pill{
+  background: linear-gradient(180deg, var(--card2), rgba(0,0,0,0));
   border:1px solid var(--border);
-  background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,0));
+  border-radius:12px;
+  padding:10px 12px;
+  margin-bottom:10px;
 }
-@media (prefers-color-scheme: dark){
-  .card-title{ background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(0,0,0,0)); }
+.card-title{
+  font-size:18px;
+  line-height:1.2;
+  font-weight:900;
+  margin:0;
+  color:var(--text);
 }
 
-.card-subchips{ display:flex; gap:8px; flex-wrap:wrap; margin: -2px 0 10px; }
+.card-subchips{ display:flex; gap:8px; flex-wrap:wrap; margin: 6px 0 10px; }
 .chip{
   display:inline-flex; align-items:center; gap:8px;
   padding:6px 10px; border-radius:999px;
-  border:1px solid var(--chip-bd); background:var(--chip-bg);
-  font-size:13px; color:var(--text); opacity:.95;
+  border:1px solid var(--chip-bd);
+  background:var(--chip-bg);
+  font-size:13px; color:var(--text);
 }
 
-.card-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px 18px; margin-top:6px; }
+.card-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:8px 18px;
+  margin-top:6px;
+}
 .card-item{ font-size:14px; color:var(--text); }
 .card-item b{ color:var(--text); }
 
@@ -479,37 +520,38 @@ html, body, [data-testid="stAppViewContainer"]{ background:var(--bg) !important;
 .tag{
   display:inline-flex; align-items:center; gap:8px;
   padding:6px 10px; border-radius:999px;
-  border:1px solid var(--chip-bd); background:var(--chip-bg);
-  font-size:13px; color:var(--text); font-weight:800;
+  border:1px solid var(--chip-bd);
+  background:var(--chip-bg);
+  font-size:13px; color:var(--text);
+  font-weight:800;
 }
-.tag-green{ background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.22); }
-.tag-yellow{ background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.25); }
-.tag-red{ background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.22); }
 .tag-gray{ opacity:.92; }
+.tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
+.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
+.tag-red{ background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.20); }
 
-.card-actions{ display:flex; gap:12px; margin-top:12px; }
-.a-btn{
-  flex:1 1 0;
-  display:flex; justify-content:center; align-items:center; gap:8px;
-  padding:10px 12px; border-radius:12px;
-  border:1px solid var(--btn-bd); background:var(--btn-bg);
-  text-decoration:none !important; color:var(--text) !important;
-  font-weight:800; font-size:14px;
-  transition:.12s ease-in-out;
+.actions-row{ margin-top:12px; }
+.section{
+  margin-top:12px;
+  padding:12px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:var(--card2);
 }
-.a-btn:hover{ transform:translateY(-1px); box-shadow:0 10px 18px rgba(0,0,0,.10); }
-.a-btn.disabled{ opacity:.45; pointer-events:none; }
-
-.section{ margin-top:12px; padding:12px; border-radius:14px; border:1px solid var(--border); }
-.section-title{ font-weight:900; color:var(--text); margin-bottom:8px; font-size:14px; }
-.row{ display:flex; gap:10px; flex-wrap:wrap; color:var(--text); font-size:13.5px; }
+.section-title{
+  font-weight:900;
+  color:var(--text);
+  margin-bottom:8px;
+  font-size:14px;
+}
+.row{ color:var(--text); font-size:13.5px; line-height:1.35; }
 .row b{ color:var(--text); }
-.row .muted{ color:var(--muted); }
+.muted{ color:var(--muted); }
 
 .issue-box{
-  border:1px solid var(--soft-red-bd);
-  background:var(--soft-red);
-  color:var(--text);
+  border:1px solid rgba(239,68,68,.22);
+  background: rgba(239,68,68,.08);
+  color: var(--text);
   padding:10px 12px;
   border-radius:12px;
   font-size:13.5px;
@@ -517,7 +559,6 @@ html, body, [data-testid="stAppViewContainer"]{ background:var(--bg) !important;
 
 @media (max-width:900px){
   .card-grid{ grid-template-columns:1fr; }
-  .card-actions{ flex-direction:column; }
 }
 </style>
 """,
@@ -540,10 +581,10 @@ st.markdown(
   <div class="hero">
     <div class="hero-row">
       <div class="hero-crest">{crest_html}</div>
-      <div>
+      <div style="flex:1;min-width:0;">
         <div class="hero-ministry">Министерство восстановления, развития приграничья и строительства Курской области</div>
         <div class="hero-app">Реестр объектов</div>
-        <div class="hero-sub">Единый список объектов 2025–2028 с фильтрами и переходом в карточку.</div>
+        <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку.</div>
       </div>
     </div>
   </div>
@@ -571,6 +612,8 @@ if APP_PASSWORD:
 
     if not st.session_state.auth_ok:
         st.markdown("### 🔐 Доступ к реестру")
+        st.write("Введите пароль для просмотра данных.")
+
         with st.form("login_form", clear_on_submit=False):
             pwd = st.text_input("Пароль", type="password")
             submitted = st.form_submit_button("Войти")
@@ -590,7 +633,10 @@ if APP_PASSWORD:
 # =============================
 raw = load_data()
 if raw.empty:
-    st.error("Данные не загрузились. Проверьте CSV_URL в Secrets (опубликованный CSV) или наличие .xlsx в репозитории.")
+    st.error(
+        "Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets "
+        "или наличие .xlsx в репозитории."
+    )
     st.stop()
 
 df = normalize_schema(raw)
@@ -608,10 +654,9 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS (без лишних надписей/разделителей)
+# FILTERS (в одной строке)
 # =============================
-c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.2, 1.6])
-
+c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 2.0], gap="small")
 with c1:
     sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
 with c2:
@@ -619,9 +664,19 @@ with c2:
 with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 with c4:
-    q_raw = st.text_input("🔎 Поиск (наименование/сокр./адрес/ответственный)", value="", key="f_search").strip()
+    q = st.text_input("🔎 Поиск (наименование/сокр./адрес/ответственный)", value="", key="f_search").strip().lower()
 
-q = q_raw.lower()
+# гибкий поиск по сокращениям
+ABBR = {
+    "фап": "фельдшерско",
+    "одкб": "одкб",
+    "црб": "црб",
+    "фок": "фок",
+}
+q_expanded = q
+for k, v in ABBR.items():
+    if q == k:
+        q_expanded = v
 
 filtered = df.copy()
 
@@ -632,20 +687,18 @@ if district_sel != "Все":
 if status_sel != "Все":
     filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
 
-if q:
+if q_expanded:
+
     def row_match(r):
-        blob = " ".join(
+        s = " ".join(
             [
                 str(r.get("name", "")),
-                str(r.get("short_name", "")),  # ФАП/ОДКБ и др.
-                str(r.get("object_type", "")),
                 str(r.get("address", "")),
                 str(r.get("responsible", "")),
-                str(r.get("district", "")),
-                str(r.get("sector", "")),
+                str(r.get("object_type", "")),
             ]
         ).lower()
-        return q in blob
+        return (q_expanded in s) or (q in s)
 
     filtered = filtered[filtered.apply(row_match, axis=1)]
 
@@ -656,10 +709,14 @@ st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
 # CARD RENDER
 # =============================
 def render_kv(label: str, value: str):
-    st.markdown(f'<div class="row"><b>{esc(label)}:</b> {esc(value)}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="row"><b>{label}:</b> {value}</div>', unsafe_allow_html=True)
 
 
-def render_card(row: pd.Series, idx: int):
+def passport_state_key(i: int) -> str:
+    return f"passport_open_{i}"
+
+
+def render_card(row: pd.Series, i: int):
     title = safe_text(row.get("name", ""), fallback="Объект")
     sector = safe_text(row.get("sector", ""), fallback="—")
     district = safe_text(row.get("district", ""), fallback="—")
@@ -671,64 +728,84 @@ def render_card(row: pd.Series, idx: int):
     issues = safe_text(row.get("issues", ""), fallback="—")
 
     card_url = normalize_url(row.get("card_url", ""))
-    # folder_url не показываем кнопкой (по ТЗ), но оставляем в данных
-    # folder_url = normalize_url(row.get("folder_url", ""))
 
     accent = status_accent(status)
     w_col = works_color(work_flag)
     u_col, u_txt = update_color(row.get("updated_at", ""))
 
-    s_tag = {"green": "tag-green", "yellow": "tag-yellow", "red": "tag-red"}.get(accent, "tag-gray")
-    w_tag = {"green": "tag-green", "yellow": "tag-yellow", "red": "tag-red"}.get(w_col, "tag-gray")
-    u_tag = {"green": "tag-green", "yellow": "tag-yellow", "red": "tag-red"}.get(u_col, "tag-gray")
+    # теги
+    def tag_class_by_color(c: str) -> str:
+        if c == "green":
+            return "tag-green"
+        if c == "yellow":
+            return "tag-yellow"
+        if c == "red":
+            return "tag-red"
+        return "tag-gray"
 
-    btn_card = (
-        f'<a class="a-btn" href="{esc(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
-        if card_url
-        else '<span class="a-btn disabled">📄 Открыть карточку</span>'
-    )
+    s_tag = tag_class_by_color(accent)
+    w_tag = tag_class_by_color(w_col)  # мягкий цвет уже в CSS
+    u_tag = tag_class_by_color(u_col)
 
+    border_cls = f"border-{accent}"
+
+    # состояние паспорта
+    k = passport_state_key(i)
+    if k not in st.session_state:
+        st.session_state[k] = False
+
+    # карточка (HTML)
     st.markdown(
         f"""
-<div class="card" data-accent="{accent}">
-  <div class="card-title">{esc(title)}</div>
+<div class="card {border_cls}">
+  <div class="title-pill">
+    <h3 class="card-title">{title}</h3>
+  </div>
 
   <div class="card-subchips">
-    <span class="chip">🏷️ {esc(sector)}</span>
-    <span class="chip">📍 {esc(district)}</span>
+    <span class="chip">🏷️ {sector}</span>
+    <span class="chip">📍 {district}</span>
   </div>
 
   <div class="card-grid">
-    <div class="card-item">🗺️ <b>Адрес:</b> {esc(address)}</div>
-    <div class="card-item">👤 <b>Ответственный:</b> {esc(responsible)}</div>
+    <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
+    <div class="card-item">👤 <b>Ответственный:</b> {responsible}</div>
   </div>
 
   <div class="card-tags">
-    <span class="tag {s_tag}">📌 Статус: {esc(status)}</span>
-    <span class="tag {w_tag}">🛠️ Работы: {esc(work_flag)}</span>
-    <span class="tag {u_tag}">⏱️ Обновлено: {esc(u_txt)}</span>
-  </div>
-
-  <div class="card-actions">
-    {btn_card}
+    <span class="tag {s_tag}">📌 Статус: {status}</span>
+    <span class="tag {w_tag}">🛠️ Работы: {work_flag}</span>
+    <span class="tag {u_tag}">⏱️ Обновлено: {u_txt}</span>
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    # Управляем сворачиванием через session_state + rerun
-    exp_key = f"exp_open_{idx}"
-    if exp_key not in st.session_state:
-        st.session_state[exp_key] = False
+    # Кнопка открытия карточки — НАТИВНО (чтобы не ломалось HTML-ссылкой)
+    with st.container():
+        if card_url:
+            st.link_button("📄 Открыть карточку", card_url, use_container_width=True)
+        else:
+            st.button("📄 Открыть карточку", disabled=True, use_container_width=True)
 
-    exp_label = "📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть"
-    with st.expander(exp_label, expanded=st.session_state[exp_key]):
-        st.session_state[exp_key] = True
+    # Кнопка раскрытия паспорта (тоже нативно)
+    colA, colB = st.columns([1, 1])
+    with colA:
+        if not st.session_state[k]:
+            if st.button("📋 Открыть паспорт объекта и контрольные показатели", key=f"open_{i}", use_container_width=True):
+                st.session_state[k] = True
+                st.rerun()
+        else:
+            if st.button("▴ Свернуть паспорт", key=f"close_top_{i}", use_container_width=True):
+                st.session_state[k] = False
+                st.rerun()
 
+    # паспорт (если открыт)
+    if st.session_state[k]:
         st.markdown('<div class="section"><div class="section-title">⚠️ Проблемные вопросы</div>', unsafe_allow_html=True)
         if issues != "—":
-            st.markdown(f'<div class="issue-box">{esc(issues)}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="issue-box">{issues}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="row"><span class="muted">—</span></div>', unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
@@ -780,9 +857,9 @@ def render_card(row: pd.Series, idx: int):
         render_kv("Оплачено", money_fmt(row.get("paid", "")))
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # кнопка снизу — реально сворачивает expander (через rerun)
-        if st.button("⬆️ Свернуть паспорт", key=f"collapse_{idx}"):
-            st.session_state[exp_key] = False
+        # Нижняя кнопка сворачивания (как вы просили)
+        if st.button("▴ Свернуть паспорт", key=f"close_bottom_{i}", use_container_width=True):
+            st.session_state[k] = False
             st.rerun()
 
 
