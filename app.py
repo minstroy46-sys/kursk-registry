@@ -182,27 +182,12 @@ def date_fmt(v) -> str:
     return d.strftime("%d.%m.%Y") if d else "—"
 
 
-def num_fmt(v) -> str:
-    s = safe_text(v, fallback="—")
-    if s == "—":
-        return s
-    try:
-        x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
-        x = float(x)
-        if x.is_integer():
-            return f"{int(x):,}".replace(",", " ")
-        return f"{x:,.2f}".replace(",", " ")
-    except Exception:
-        return s
-
-
 def readiness_fmt(v) -> str:
     """
     Нормализует готовность:
     - 0.38 / 0,38 -> 38%
     - 38 -> 38%
     - 38% -> 38%
-    - пусто -> —
     """
     s = safe_text(v, fallback="—")
     if s == "—":
@@ -213,7 +198,6 @@ def readiness_fmt(v) -> str:
     if "%" in s0:
         return s0.replace(" ", "")
 
-    # пробуем число
     try:
         x = str(s0).replace(" ", "").replace("\u00A0", "").replace(",", ".")
         x = float(x)
@@ -222,10 +206,8 @@ def readiness_fmt(v) -> str:
         else:
             p = x
 
-        # красивое форматирование
         if abs(p - round(p)) < 1e-9:
             return f"{int(round(p))}%"
-        # одна цифра после запятой
         return f"{p:.1f}".replace(".", ",") + "%"
     except Exception:
         return s0
@@ -449,7 +431,6 @@ st.markdown(
   --btn-bd: rgba(15,23,42,.12);
   --hr: rgba(15,23,42,.12);
 
-  /* Новый мягкий фон секций (не белый) */
   --soft: linear-gradient(180deg, rgba(250,252,255,.96), rgba(244,247,255,.96));
   --soft2: linear-gradient(180deg, rgba(255,255,255,.90), rgba(246,248,255,.92));
 }
@@ -626,7 +607,7 @@ html, body, [data-testid="stAppViewContainer"]{
   overflow-wrap: anywhere;
 }
 
-/* PASSPORT (details) */
+/* PASSPORT (без JS): checkbox-toggle */
 .passport{
   margin-top: 12px;
   border-radius: 14px;
@@ -634,26 +615,44 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--soft2);
   overflow: hidden;
 }
-.passport summary{
+
+/* скрытый чекбокс */
+.passport-toggle{
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* шапка */
+.passport-summary{
   cursor: pointer;
-  list-style: none;
   padding: 12px 12px;
   font-weight: 900;
   color: var(--text);
   display:flex;
   align-items:center;
   gap: 10px;
+  user-select: none;
 }
-.passport summary::-webkit-details-marker{ display:none; }
-.passport summary:before{
+.passport-summary:before{
   content: "▸";
   font-weight: 900;
   opacity: .7;
 }
-.passport[open] summary:before{ content: "▾"; }
-.passport .passport-body{
+.passport-toggle:checked + .passport-summary:before{
+  content: "▾";
+}
+
+/* тело скрыто */
+.passport-body{
+  display: none;
   padding: 12px 12px 14px 12px;
   border-top: 1px dashed var(--hr);
+}
+
+/* раскрыто */
+.passport-toggle:checked ~ .passport-body{
+  display: block;
 }
 
 /* Секции паспорта в 2 колонки */
@@ -663,31 +662,35 @@ html, body, [data-testid="stAppViewContainer"]{
   gap: 12px;
 }
 .section-wide{
-  grid-column: 1 / -1; /* на всю ширину */
+  grid-column: 1 / -1;
 }
 
-/* Кнопка-свернуть внизу по центру */
+/* стрелка-свернуть снизу */
 .passport-close{
-  display:flex;
+  display: none;
   justify-content:center;
   margin-top: 10px;
 }
-.passport-close a{
+.passport-toggle:checked ~ .passport-close{
+  display:flex;
+}
+.passport-close-btn{
   width: 34px;
   height: 34px;
   border-radius: 999px;
   border: 1px solid var(--btn-bd);
   background: rgba(255,255,255,.92);
   color: var(--text);
-  text-decoration: none !important;
   font-weight: 900;
   display:flex;
   align-items:center;
   justify-content:center;
   line-height: 1;
   transition: .12s ease-in-out;
+  cursor: pointer;
+  user-select: none;
 }
-.passport-close a:hover{
+.passport-close-btn:hover{
   transform: translateY(-1px);
   box-shadow: 0 10px 18px rgba(0,0,0,.10);
 }
@@ -860,7 +863,8 @@ def section_html(title: str, inner_html: str, wide: bool = False) -> str:
 
 
 def render_card(row: pd.Series):
-    title = esc(row.get("name", "Объект"))
+    title_txt = safe_text(row.get("name", "Объект"))
+    title = esc(title_txt)
     sector = esc(row.get("sector", "—"))
     district = esc(row.get("district", "—"))
     address = esc(row.get("address", "—"))
@@ -893,8 +897,6 @@ def render_card(row: pd.Series):
         issues_html = '<div class="row"><span class="muted">—</span></div>'
 
     passport_blocks = []
-
-    # Проблемы — на всю ширину
     passport_blocks.append(section_html("⚠️ Проблемные вопросы", issues_html, wide=True))
 
     prog = (
@@ -943,7 +945,6 @@ def render_card(row: pd.Series):
     )
     passport_blocks.append(section_html("🧩 Контракт", contr))
 
-    # ВАЖНО: готовность форматируем как %
     terms = (
         kv_html("Окончание (план)", date_fmt(row.get("end_date_plan", "")))
         + kv_html("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))
@@ -952,18 +953,27 @@ def render_card(row: pd.Series):
     )
     passport_blocks.append(section_html("⏳ Сроки / финансы", terms))
 
+    # Уникальный id переключателя (ВАЖНО)
+    rid = safe_text(row.get("id", ""), fallback="").strip()
+    if not rid:
+        rid = f"row_{abs(hash(title_txt))}"
+    rid = re.sub(r"[^a-zA-Z0-9_]+", "_", rid)
+    toggle_id = f"passport_{rid}"
+
+    # PASSPORT: checkbox + label (работает без JS)
     passport_html = (
-        '<details class="passport">'
-        '<summary>📋 Паспорт объекта и контрольные показатели</summary>'
-        '<div class="passport-body">'
-        '<div class="passport-grid">'
-        + "".join(passport_blocks)
-        + "</div>"
-        # стрелка-свернуть по центру
-        + '<div class="passport-close">'
-          '<a href="#" title="Свернуть" onclick="this.closest(\'details\').removeAttribute(\'open\'); return false;">▴</a>'
-          "</div>"
-        + "</div></details>"
+        f'<div class="passport">'
+        f'  <input class="passport-toggle" type="checkbox" id="{toggle_id}">'
+        f'  <label class="passport-summary" for="{toggle_id}">📋 Паспорт объекта и контрольные показатели</label>'
+        f'  <div class="passport-body">'
+        f'    <div class="passport-grid">'
+        + "".join(passport_blocks) +
+        f'    </div>'
+        f'  </div>'
+        f'  <div class="passport-close">'
+        f'    <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>'
+        f'  </div>'
+        f'</div>'
     )
 
     card_html = f"""
