@@ -128,6 +128,7 @@ def try_parse_date(v) -> date | None:
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
+    # serial date
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
@@ -184,10 +185,9 @@ def date_fmt(v) -> str:
 
 def readiness_fmt(v) -> str:
     """
-    Нормализует готовность:
-    - 0.38 / 0,38 -> 38%
-    - 38 -> 38%
-    - 38% -> 38%
+    0.38 / 0,38 -> 38%
+    38 -> 38%
+    38% -> 38%
     """
     s = safe_text(v, fallback="—")
     if s == "—":
@@ -265,6 +265,7 @@ def build_row_search_blob(row: pd.Series) -> str:
     )
     blob = norm_search(base)
 
+    # добавляем аббревиатуры, если нашли полные формы
     for abbr, expansions in ABBR.items():
         for full in expansions:
             full_n = norm_search(full)
@@ -299,6 +300,7 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
+    # fallback local
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -351,10 +353,12 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "updated_at", "last_update", "обновлено", "updated"
     ) else ""
 
+    # ссылка на карточку
     out["card_url_text"] = df[
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
 
+    # Паспортные поля
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
         "state_program", "гп", "государственная программа"
     ) else ""
@@ -420,19 +424,26 @@ st.markdown(
     """
 <style>
 :root{
-  --bg: #f7f8fb;
+  /* общий фон серый */
+  --bg: #eef1f5;
+
   --text: #0f172a;
   --muted: rgba(15,23,42,.72);
-  --border: rgba(15,23,42,.10);
-  --shadow: rgba(0,0,0,.06);
+  --border: rgba(15,23,42,.12);
+  --border-strong: rgba(15,23,42,.18);
+  --shadow: rgba(0,0,0,.07);
+
   --chip-bg: rgba(15,23,42,.05);
   --chip-bd: rgba(15,23,42,.10);
-  --btn-bg: rgba(255,255,255,.95);
-  --btn-bd: rgba(15,23,42,.12);
+
+  --btn-bg: rgba(255,255,255,.96);
+  --btn-bd: rgba(15,23,42,.18);
+  --btn-ring: rgba(15,23,42,.10);
+
   --hr: rgba(15,23,42,.12);
 
   --soft: linear-gradient(180deg, rgba(250,252,255,.96), rgba(244,247,255,.96));
-  --soft2: linear-gradient(180deg, rgba(255,255,255,.90), rgba(246,248,255,.92));
+  --soft2: linear-gradient(180deg, rgba(255,255,255,.92), rgba(246,248,255,.94));
 }
 
 .block-container { padding-top: 24px !important; max-width: 1200px; }
@@ -493,8 +504,8 @@ html, body, [data-testid="stAppViewContainer"]{
 /* CARD */
 .card{
   background:
-    radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%),
-    radial-gradient(700px 260px at 92% 18%, rgba(16,185,129,.08), rgba(0,0,0,0) 55%),
+    radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.09), rgba(0,0,0,0) 55%),
+    radial-gradient(700px 260px at 92% 18%, rgba(16,185,129,.07), rgba(0,0,0,0) 55%),
     linear-gradient(180deg, #ffffff, #f4f8ff);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -556,6 +567,7 @@ html, body, [data-testid="stAppViewContainer"]{
 .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
+/* кнопка (делаем более отделённой от карточки) */
 .a-btn{
   width: 100%;
   display:flex; justify-content:center; align-items:center; gap: 8px;
@@ -569,8 +581,13 @@ html, body, [data-testid="stAppViewContainer"]{
   font-size: 14px;
   transition: .12s ease-in-out;
   margin-top: 12px;
+
+  /* визуальный контур/отделение */
+  box-shadow:
+    0 10px 18px rgba(0,0,0,.08),
+    inset 0 0 0 1px var(--btn-ring);
 }
-.a-btn:hover{ transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,.10); }
+.a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10), inset 0 0 0 1px var(--btn-ring); }
 .a-btn.disabled{ opacity: .45; pointer-events:none; }
 
 /* SECTION */
@@ -607,13 +624,16 @@ html, body, [data-testid="stAppViewContainer"]{
   overflow-wrap: anywhere;
 }
 
-/* PASSPORT (без JS): checkbox-toggle */
+/* PASSPORT (без JS): checkbox-toggle + отдельный контур */
 .passport{
   margin-top: 12px;
   border-radius: 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--soft2);
   overflow: hidden;
+
+  /* контур, чтобы не сливался с карточкой */
+  box-shadow: 0 10px 18px rgba(0,0,0,.08);
 }
 
 /* скрытый чекбокс */
@@ -655,7 +675,7 @@ html, body, [data-testid="stAppViewContainer"]{
   display: block;
 }
 
-/* Секции паспорта в 2 колонки */
+/* 2 колонки */
 .passport-grid{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -669,7 +689,7 @@ html, body, [data-testid="stAppViewContainer"]{
 .passport-close{
   display: none;
   justify-content:center;
-  margin-top: 10px;
+  margin: 10px 0 12px 0;
 }
 .passport-toggle:checked ~ .passport-close{
   display:flex;
@@ -689,10 +709,11 @@ html, body, [data-testid="stAppViewContainer"]{
   transition: .12s ease-in-out;
   cursor: pointer;
   user-select: none;
+  box-shadow: 0 10px 18px rgba(0,0,0,.08);
 }
 .passport-close-btn:hover{
   transform: translateY(-1px);
-  box-shadow: 0 10px 18px rgba(0,0,0,.10);
+  box-shadow: 0 14px 22px rgba(0,0,0,.10);
 }
 
 @media (max-width: 900px){
@@ -794,7 +815,7 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS
+# FILTERS + SEARCH
 # =============================
 c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
@@ -810,6 +831,15 @@ with c4:
         key="f_search",
         placeholder="Например: ФАП, ОДКБ, школа, Курский…",
     ).strip()
+
+# КНОПКА ниже поиска (обновляет отображение, кеш и перечитывает реестр)
+btn_c1, btn_c2 = st.columns([0.35, 0.65])
+with btn_c1:
+    if st.button("🔄 Обновить данные", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+with btn_c2:
+    st.caption("Данные в реестре обновляются вашим триггером Apps Script. Эта кнопка обновляет отображение на сайте.")
 
 
 # =============================
@@ -953,14 +983,13 @@ def render_card(row: pd.Series):
     )
     passport_blocks.append(section_html("⏳ Сроки / финансы", terms))
 
-    # Уникальный id переключателя (ВАЖНО)
+    # Уникальный id для переключателя паспорта
     rid = safe_text(row.get("id", ""), fallback="").strip()
     if not rid:
         rid = f"row_{abs(hash(title_txt))}"
     rid = re.sub(r"[^a-zA-Z0-9_]+", "_", rid)
     toggle_id = f"passport_{rid}"
 
-    # PASSPORT: checkbox + label (работает без JS)
     passport_html = (
         f'<div class="passport">'
         f'  <input class="passport-toggle" type="checkbox" id="{toggle_id}">'
