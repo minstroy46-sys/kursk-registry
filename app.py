@@ -76,6 +76,9 @@ def extract_url(value: str) -> str:
     if not matches:
         return s
     for m in matches:
+        if "docs.google.com/spreadsheets" in m:
+            return m
+    for m in matches:
         if "docs.google.com" in m:
             return m
     return matches[0]
@@ -636,7 +639,7 @@ html, body, [data-testid="stAppViewContainer"]{
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
-.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
+tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
 .card-actions{
@@ -713,8 +716,26 @@ html, body, [data-testid="stAppViewContainer"]{
   font-weight: 800;
   color: var(--text);
   list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .passport-details summary::-webkit-details-marker{ display:none; }
+.passport-details summary:after{
+  content: "▾";
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 14px;
+}
+.passport-details[open] summary:after{
+  content: "▴";
+}
+.passport-hint{
+  margin-top: 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12.5px;
+}
 
 .filters-title{
   font-weight: 900;
@@ -737,26 +758,6 @@ div[data-testid="stTextInput"] > div{
 }
 div[data-testid="stTextInput"] input{
   color: var(--text);
-}
-
-.passport-collapse{
-  margin-top: 12px;
-  text-align: center;
-  color: var(--muted);
-  font-weight: 700;
-  font-size: 13px;
-}
-.passport-collapse button{
-  cursor: pointer;
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px dashed var(--hr);
-  background: var(--card);
-  color: var(--text);
-  font-weight: 700;
 }
 
 @media (max-width: 900px){
@@ -874,7 +875,7 @@ with c4:
         "Поиск",
         value="",
         key="f_search",
-        placeholder="Название, адрес, ответственный, аббревиатуры (ФАП, ОДКБ, ФОК...)",
+        placeholder="Название, адрес, оветственный, аббревиатуры (ФАП, ОДКБ, ФОК...)",
     )
 st.markdown("</div>", unsafe_allow_html=True)
 q = q.strip().lower()
@@ -949,11 +950,10 @@ def render_card(row: pd.Series):
     elif u_col == "red":
         u_tag = "tag-red"
 
-    btn_card = (
-        f'<a class="a-btn" href="{card_url}" target="_blank">📄 Открыть карточку</a>'
-        if card_url and card_url != "—"
-        else '<span class="a-btn disabled">📄 Открыть карточку</span>'
-    )
+    if card_url and card_url != "—" and str(card_url).startswith("http"):
+        btn_card = f'<a class="a-btn" href="{card_url}" target="_blank" rel="noopener">📄 Открыть карточку</a>'
+    else:
+        btn_card = '<span class="a-btn disabled">📄 Открыть карточку</span>'
 
     st.markdown(
         f"""
@@ -966,7 +966,7 @@ def render_card(row: pd.Series):
   </div>
 
   <div class="card-grid">
-    <div class="card-item">🗺 <b>Адрес:</b> {address}</div>
+    <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
     <div class="card-item">👤 <b>Ответственный:</b> {responsible}</div>
   </div>
 
@@ -1052,13 +1052,11 @@ def render_card(row: pd.Series):
   {section("🏛️ Программы", programs_block)}
   {section("🧾 Соглашение", agreement_block)}
   {section("📦 Параметры", params_block)}
-  {section("🗂️ ПСД / Экспетиза", psd_block)}
+  {section("🗂️ ПСД / Экспертиза", psd_block)}
   {section("🏗️ РНС", rns_block)}
   {section("🧩 Контракт", contract_block)}
   {section("⏳ Сроки / финансы", timeline_block)}
-  <div class="passport-collapse">
-    <button type="button" onclick="this.closest('details').removeAttribute('open')">⬆️ Свернуть паспорт</button>
-  </div>
+  <div class="passport-hint">⬆️ Нажмите заголовок «Паспорт…», чтобы свернуть</div>
 </details>
 """
     st.markdown(passport_html, unsafe_allow_html=True)
