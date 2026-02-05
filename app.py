@@ -405,7 +405,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (фикс мобильных цветов + убрать "пустой блок")
+# STYLES (добавили “воздух”, ровные строки с иконками, паспорт внутри контура)
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -431,6 +431,8 @@ st.markdown(
   --btn-bg: rgba(255,255,255,.96);
   --btn-bd: rgba(15,23,42,.18);
   --btn-shadow: rgba(0,0,0,.08);
+
+  --pad: 20px;
 }
 
 .block-container { padding-top: 24px !important; max-width: 1200px; }
@@ -445,21 +447,12 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
 }
 
-/* ----------------------------
-   ВАЖНО: фикс белого/бледного текста на мобильном
----------------------------- */
-html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
-  color: var(--text);
-}
+/* фикс текста на мобильном */
+html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{ color: var(--text); }
 p, span, li, div, small { color: var(--text); }
 .stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
-label, [data-testid="stWidgetLabel"] *{
-  color: var(--text) !important;
-  opacity: 1 !important;
-}
-h1,h2,h3,h4,h5,h6{
-  color: var(--text) !important;
-}
+label, [data-testid="stWidgetLabel"] *{ color: var(--text) !important; opacity: 1 !important; }
+h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
 
 /* HERO */
 .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 10px; }
@@ -504,7 +497,7 @@ h1,h2,h3,h4,h5,h6{
   .hero-row{ align-items:center; }
 }
 
-/* Виджеты фильтров/поиска/пароля — делаем визуально "панельными" без HTML-обёртки */
+/* Панели фильтров */
 div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
   border: 1px solid rgba(15,23,42,.16);
@@ -512,8 +505,6 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   padding: 10px 10px 6px 10px;
   box-shadow: 0 14px 26px rgba(0,0,0,.08);
 }
-
-/* Сами поля внутри */
 div[data-testid="stTextInput"] input,
 div[data-testid="stSelectbox"] div[role="combobox"]{
   border: 1px solid var(--border-strong) !important;
@@ -522,66 +513,124 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border-radius: 12px !important;
 }
 
-/* Карточка */
+/* Карточка — больше воздуха */
 .card{
   background:
     radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.08), rgba(0,0,0,0) 55%),
     radial-gradient(700px 260px at 92% 18%, rgba(16,185,129,.06), rgba(0,0,0,0) 55%),
     linear-gradient(180deg, #ffffff, #f4f8ff);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 10px 22px var(--shadow);
-  margin-bottom: 14px;
+  border-radius: 18px;
+  padding: var(--pad);
+  box-shadow: 0 12px 26px var(--shadow);
+  margin-bottom: 16px;
   position: relative;
+  overflow: hidden;
 }
 
+/* левый акцент мягче, но выразительный */
 .card[data-accent="green"]{
-  border-color: rgba(34,197,94,.35);
-  box-shadow: 0 10px 22px var(--shadow),
-              inset 12px 0 0 rgba(34,197,94,.55),
-              0 0 18px rgba(34,197,94,.12);
+  border-color: rgba(34,197,94,.32);
+  box-shadow: 0 12px 26px var(--shadow),
+              inset 12px 0 0 rgba(34,197,94,.52);
 }
 .card[data-accent="yellow"]{
-  border-color: rgba(245,158,11,.38);
-  box-shadow: 0 10px 22px var(--shadow),
-              inset 12px 0 0 rgba(245,158,11,.58),
-              0 0 18px rgba(245,158,11,.12);
+  border-color: rgba(245,158,11,.34);
+  box-shadow: 0 12px 26px var(--shadow),
+              inset 12px 0 0 rgba(245,158,11,.56);
 }
 .card[data-accent="red"]{
-  border-color: rgba(239,68,68,.38);
-  box-shadow: 0 10px 22px var(--shadow),
-              inset 12px 0 0 rgba(239,68,68,.58),
-              0 0 18px rgba(239,68,68,.12);
+  border-color: rgba(239,68,68,.34);
+  box-shadow: 0 12px 26px var(--shadow),
+              inset 12px 0 0 rgba(239,68,68,.56);
 }
 .card[data-accent="blue"]{
-  border-color: rgba(59,130,246,.32);
-  box-shadow: 0 10px 22px var(--shadow),
-              inset 12px 0 0 rgba(59,130,246,.52),
-              0 0 18px rgba(59,130,246,.10);
+  border-color: rgba(59,130,246,.30);
+  box-shadow: 0 12px 26px var(--shadow),
+              inset 12px 0 0 rgba(59,130,246,.50);
 }
 
-.card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; color: var(--text) !important; }
-.card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 10px; }
+.card-head{ display:flex; flex-direction:column; gap: 10px; }
+.card-title{
+  font-size: 20px;
+  line-height: 1.18;
+  font-weight: 950;
+  margin: 0;
+  color: var(--text) !important;
+}
+.card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
 .chip{
   display:inline-flex; align-items:center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
+  padding: 6px 10px;
+  border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px; color: var(--text) !important;
+  font-size: 13px;
+  color: var(--text) !important;
+  font-weight: 800;
 }
 
-.card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin-top: 6px; }
-.card-item{ font-size: 14px; color: var(--text) !important; }
-.card-item b{ color: var(--text) !important; }
+/* РОВНЫЕ строки с иконками: адрес/ответственный */
+.info-grid{
+  margin-top: 2px;
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+.info-item{
+  display:flex;
+  gap: 10px;
+  align-items:flex-start;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15,23,42,.12);
+  background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(245,248,255,.92));
+}
+.ico{
+  width: 30px; height: 30px;
+  border-radius: 10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border: 1px solid rgba(15,23,42,.10);
+  background: rgba(15,23,42,.05);
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.itxt{ min-width: 0; }
+.ilbl{
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--muted) !important;
+  letter-spacing: .2px;
+}
+.ival{
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.25;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
 
-.card-tags{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+/* Тэги статуса/работ/обновления */
+.card-tags{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
 .tag{
-  display:inline-flex; align-items:center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px; color: var(--text) !important; font-weight: 800;
+  font-size: 13px;
+  color: var(--text) !important;
+  font-weight: 900;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
@@ -592,42 +641,39 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .a-btn{
   width: 100%;
   display:flex; justify-content:center; align-items:center; gap: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 11px 12px;
+  border-radius: 14px;
   border: 1px solid var(--btn-bd);
   background: var(--btn-bg);
   text-decoration:none !important;
   color: var(--text) !important;
-  font-weight: 900;
+  font-weight: 950;
   font-size: 14px;
   transition: .12s ease-in-out;
-  margin-top: 12px;
+  margin-top: 14px;
   box-shadow: 0 10px 18px var(--btn-shadow);
 }
 .a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
 .a-btn.disabled{ opacity: .45; pointer-events:none; }
 
-/* Паспорт - отдельный контур */
+/* Паспорт ВНУТРИ общего контура: без “второй карточки”, только мягкая секция */
 .passport{
-  margin-top: 12px;
-  border-radius: 14px;
-  border: 1px solid var(--border-strong);
-  background: var(--soft2);
-  overflow: hidden;
-  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+  margin-top: 14px;
+  border-top: 1px solid rgba(15,23,42,.12);
+  padding-top: 10px;
 }
-
-/* скрытый чекбокс */
 .passport-toggle{
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
-
 .passport-summary{
   cursor: pointer;
-  padding: 12px 12px;
-  font-weight: 900;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15,23,42,.12);
+  background: linear-gradient(180deg, rgba(255,255,255,.88), rgba(245,248,255,.92));
+  font-weight: 950;
   color: var(--text) !important;
   display:flex;
   align-items:center;
@@ -636,21 +682,21 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 }
 .passport-summary:before{
   content: "▸";
-  font-weight: 900;
-  opacity: .7;
+  font-weight: 950;
+  opacity: .75;
 }
 .passport-toggle:checked + .passport-summary:before{
   content: "▾";
 }
-
 .passport-body{
   display: none;
-  padding: 12px 12px 14px 12px;
-  border-top: 1px dashed rgba(15,23,42,.12);
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15,23,42,.12);
+  background: var(--soft2);
 }
-.passport-toggle:checked ~ .passport-body{
-  display: block;
-}
+.passport-toggle:checked ~ .passport-body{ display: block; }
 
 /* 2 колонки секций */
 .passport-grid{
@@ -667,7 +713,12 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border: 1px solid rgba(15,23,42,.12);
   background: var(--soft);
 }
-.section-title{ font-weight: 900; color: var(--text) !important; margin-bottom: 8px; font-size: 14px; }
+.section-title{
+  font-weight: 950;
+  color: var(--text) !important;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
 .row{
   display:flex;
   gap: 10px;
@@ -693,15 +744,13 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   overflow-wrap: anywhere;
 }
 
-/* стрелка-свернуть снизу */
+/* кнопка “свернуть” — аккуратно, внутри паспорта */
 .passport-close{
   display: none;
   justify-content:center;
-  margin: 10px 0 12px 0;
+  margin-top: 10px;
 }
-.passport-toggle:checked ~ .passport-close{
-  display:flex;
-}
+.passport-toggle:checked ~ .passport-close{ display:flex; }
 .passport-close-btn{
   width: 34px;
   height: 34px;
@@ -709,7 +758,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border: 1px solid rgba(15,23,42,.18);
   background: rgba(255,255,255,.92);
   color: var(--text) !important;
-  font-weight: 900;
+  font-weight: 950;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -725,8 +774,8 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 }
 
 @media (max-width: 900px){
-  .card-grid{ grid-template-columns: 1fr; }
   .card-title{ font-size: 18px; }
+  .info-grid{ grid-template-columns: 1fr; }
   .passport-grid{ grid-template-columns: 1fr; }
 }
 </style>
@@ -824,7 +873,6 @@ statuses = ["Все"] + statuses
 
 # =============================
 # FILTERS + SEARCH
-# (ВАЖНО: никаких HTML-обёрток — чтобы не появлялся "пустой блок")
 # =============================
 c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
@@ -992,35 +1040,54 @@ def render_card(row: pd.Series):
         f'    <div class="passport-grid">'
         + "".join(passport_blocks) +
         f'    </div>'
-        f'  </div>'
-        f'  <div class="passport-close">'
-        f'    <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>'
+        f'    <div class="passport-close">'
+        f'      <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>'
+        f'    </div>'
         f'  </div>'
         f'</div>'
     )
 
+    info_html = f"""
+<div class="info-grid">
+  <div class="info-item">
+    <div class="ico">🗺️</div>
+    <div class="itxt">
+      <div class="ilbl">Адрес</div>
+      <div class="ival">{address}</div>
+    </div>
+  </div>
+  <div class="info-item">
+    <div class="ico">👤</div>
+    <div class="itxt">
+      <div class="ilbl">Ответственный</div>
+      <div class="ival">{responsible}</div>
+    </div>
+  </div>
+</div>
+"""
+
     card_html = f"""
 <div class="card" data-accent="{esc(accent)}">
-  <div class="card-title">{title}</div>
+  <div class="card-head">
+    <div class="card-title">{title}</div>
 
-  <div class="card-subchips">
-    <span class="chip">🏷️ {sector}</span>
-    <span class="chip">📍 {district}</span>
+    <div class="card-subchips">
+      <span class="chip">🏷️ {sector}</span>
+      <span class="chip">📍 {district}</span>
+    </div>
+
+    {info_html}
+
+    <div class="card-tags">
+      <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
+      <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
+      <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
+    </div>
+
+    {btn_html}
+
+    {passport_html}
   </div>
-
-  <div class="card-grid">
-    <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
-    <div class="card-item">👤 <b>Ответственный:</b> {responsible}</div>
-  </div>
-
-  <div class="card-tags">
-    <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
-    <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
-    <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
-  </div>
-
-  {btn_html}
-  {passport_html}
 </div>
 """
     st.markdown(card_html, unsafe_allow_html=True)
