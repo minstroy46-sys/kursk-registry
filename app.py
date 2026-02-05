@@ -212,6 +212,15 @@ def norm_search(s: str) -> str:
     return s
 
 
+# --- КЛЮЧЕВАЯ ФУНКЦИЯ: убираем любые лидирующие пробелы в HTML,
+# чтобы Streamlit не превращал строки в Markdown-code block
+def html_clean(s: str) -> str:
+    if s is None:
+        return ""
+    lines = str(s).splitlines()
+    return "\n".join([ln.lstrip() for ln in lines]).strip()
+
+
 # =============================
 # SEARCH: abbreviations
 # =============================
@@ -405,12 +414,13 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (фикс мобильных цветов + убрать "пустой блок")
+# STYLES (оригинал + немного воздуха)
 # =============================
 crest_b64 = read_local_crest_b64()
 
 st.markdown(
-    """
+    html_clean(
+        """
 <style>
 :root{
   --text: #0f172a;
@@ -445,9 +455,6 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
 }
 
-/* ----------------------------
-   ВАЖНО: фикс белого/бледного текста на мобильном
----------------------------- */
 html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
   color: var(--text);
 }
@@ -504,7 +511,7 @@ h1,h2,h3,h4,h5,h6{
   .hero-row{ align-items:center; }
 }
 
-/* Виджеты фильтров/поиска/пароля — делаем визуально "панельными" без HTML-обёртки */
+/* Виджеты фильтров/поиска/пароля */
 div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
   border: 1px solid rgba(15,23,42,.16);
@@ -512,8 +519,6 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   padding: 10px 10px 6px 10px;
   box-shadow: 0 14px 26px rgba(0,0,0,.08);
 }
-
-/* Сами поля внутри */
 div[data-testid="stTextInput"] input,
 div[data-testid="stSelectbox"] div[role="combobox"]{
   border: 1px solid var(--border-strong) !important;
@@ -522,7 +527,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border-radius: 12px !important;
 }
 
-/* Карточка */
+/* Карточка (чуть больше воздуха) */
 .card{
   background:
     radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.08), rgba(0,0,0,0) 55%),
@@ -530,7 +535,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
     linear-gradient(180deg, #ffffff, #f4f8ff);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 16px;
+  padding: 22px; /* ВОЗДУХ */
   box-shadow: 0 10px 22px var(--shadow);
   margin-bottom: 14px;
   position: relative;
@@ -562,20 +567,22 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 }
 
 .card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; color: var(--text) !important; }
-.card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 10px; }
+.card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 12px; }
+
 .chip{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
   font-size: 13px; color: var(--text) !important;
+  font-weight: 800;
 }
 
-.card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin-top: 6px; }
+.card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin-top: 8px; }
 .card-item{ font-size: 14px; color: var(--text) !important; }
 .card-item b{ color: var(--text) !important; }
 
-.card-tags{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.card-tags{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .tag{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
@@ -601,15 +608,15 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   font-weight: 900;
   font-size: 14px;
   transition: .12s ease-in-out;
-  margin-top: 12px;
+  margin-top: 14px;
   box-shadow: 0 10px 18px var(--btn-shadow);
 }
 .a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
 .a-btn.disabled{ opacity: .45; pointer-events:none; }
 
-/* Паспорт - отдельный контур */
+/* Паспорт */
 .passport{
-  margin-top: 12px;
+  margin-top: 14px;
   border-radius: 14px;
   border: 1px solid var(--border-strong);
   background: var(--soft2);
@@ -652,7 +659,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   display: block;
 }
 
-/* 2 колонки секций */
 .passport-grid{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -730,7 +736,8 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   .passport-grid{ grid-template-columns: 1fr; }
 }
 </style>
-""",
+"""
+    ),
     unsafe_allow_html=True,
 )
 
@@ -745,7 +752,8 @@ crest_html = (
 )
 
 st.markdown(
-    f"""
+    html_clean(
+        f"""
 <div class="hero-wrap">
   <div class="hero">
     <div class="hero-row">
@@ -758,7 +766,8 @@ st.markdown(
     </div>
   </div>
 </div>
-""",
+"""
+    ),
     unsafe_allow_html=True,
 )
 
@@ -824,7 +833,6 @@ statuses = ["Все"] + statuses
 
 # =============================
 # FILTERS + SEARCH
-# (ВАЖНО: никаких HTML-обёрток — чтобы не появлялся "пустой блок")
 # =============================
 c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
@@ -879,12 +887,12 @@ def tag_class(color: str) -> str:
 
 
 def kv_html(label: str, value) -> str:
-    return f'<div class="row"><b>{esc(label)}:</b> {esc(value)}</div>'
+    return html_clean(f'<div class="row"><b>{esc(label)}:</b> {esc(value)}</div>')
 
 
 def section_html(title: str, inner_html: str, wide: bool = False) -> str:
     cls = "section section-wide" if wide else "section"
-    return f'<div class="{cls}"><div class="section-title">{esc(title)}</div>{inner_html}</div>'
+    return html_clean(f'<div class="{cls}"><div class="section-title">{esc(title)}</div>{inner_html}</div>')
 
 
 def render_card(row: pd.Series):
@@ -909,13 +917,13 @@ def render_card(row: pd.Series):
 
     card_url = ensure_url(row.get("card_url_text", ""))
 
-    btn_html = (
+    btn_html = html_clean(
         f'<a class="a-btn" href="{esc(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
         if card_url
         else '<span class="a-btn disabled">📄 Открыть карточку</span>'
     )
 
-    issues_html = (
+    issues_html = html_clean(
         f'<div class="issue-box">{esc(issues)}</div>'
         if issues != "—"
         else '<div class="row"><span class="muted">—</span></div>'
@@ -984,22 +992,25 @@ def render_card(row: pd.Series):
     rid = re.sub(r"[^a-zA-Z0-9_]+", "_", rid)
     toggle_id = f"passport_{rid}"
 
-    passport_html = (
-        f'<div class="passport">'
-        f'  <input class="passport-toggle" type="checkbox" id="{toggle_id}">'
-        f'  <label class="passport-summary" for="{toggle_id}">📋 Паспорт объекта и контрольные показатели</label>'
-        f'  <div class="passport-body">'
-        f'    <div class="passport-grid">'
-        + "".join(passport_blocks) +
-        f'    </div>'
-        f'  </div>'
-        f'  <div class="passport-close">'
-        f'    <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>'
-        f'  </div>'
-        f'</div>'
+    passport_html = html_clean(
+        f"""
+<div class="passport">
+  <input class="passport-toggle" type="checkbox" id="{toggle_id}">
+  <label class="passport-summary" for="{toggle_id}">📋 Паспорт объекта и контрольные показатели</label>
+  <div class="passport-body">
+    <div class="passport-grid">
+      {''.join(passport_blocks)}
+    </div>
+  </div>
+  <div class="passport-close">
+    <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>
+  </div>
+</div>
+"""
     )
 
-    card_html = f"""
+    card_html = html_clean(
+        f"""
 <div class="card" data-accent="{esc(accent)}">
   <div class="card-title">{title}</div>
 
@@ -1023,6 +1034,8 @@ def render_card(row: pd.Series):
   {passport_html}
 </div>
 """
+    )
+
     st.markdown(card_html, unsafe_allow_html=True)
 
 
