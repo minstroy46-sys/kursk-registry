@@ -1,4 +1,5 @@
 import base64
+import html
 import re
 from datetime import datetime, date
 from pathlib import Path
@@ -14,7 +15,7 @@ st.set_page_config(page_title="Реестр объектов", layout="wide")
 
 
 # =============================
-# HELPERS
+# HELPERS (safe / normalize)
 # =============================
 def safe_text(v, fallback="—") -> str:
     if v is None:
@@ -30,6 +31,10 @@ def safe_text(v, fallback="—") -> str:
     return s
 
 
+def html_escape(v) -> str:
+    return html.escape(safe_text(v, fallback="—"))
+
+
 def norm_col(s: str) -> str:
     if s is None:
         return ""
@@ -38,14 +43,21 @@ def norm_col(s: str) -> str:
     return s
 
 
+def norm_search(s: str) -> str:
+    """Нормализация текста для поиска (рус/лат/цифры), без мусора."""
+    s = safe_text(s, fallback="")
+    s = s.lower().replace("ё", "е")
+    s = re.sub(r"[^\w\s\-\/\.]", " ", s, flags=re.UNICODE)  # убираем лишнюю пунктуацию
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
     cols = {norm_col(c): c for c in df.columns}
-    # 1) точное совпадение по нормализованному
     for cand in candidates:
         nc = norm_col(cand)
         if nc in cols:
             return cols[nc]
-    # 2) частичное совпадение
     for cand in candidates:
         nc = norm_col(cand)
         if not nc:
@@ -54,6 +66,15 @@ def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
             if nc in norm_col(c):
                 return c
     return None
+
+
+def ensure_url(v) -> str:
+    x = safe_text(v, fallback="").strip()
+    if not x or x == "—":
+        return ""
+    if re.match(r"^https?://", x, flags=re.I):
+        return x
+    return ""
 
 
 def read_local_crest_b64() -> str | None:
@@ -171,15 +192,71 @@ def date_fmt(v) -> str:
     return d.strftime("%d.%m.%Y") if d else "—"
 
 
-def ensure_url(s: str) -> str:
-    """Оставляем только рабочие http(s) URL. Иначе возвращаем пустую строку."""
-    x = safe_text(s, fallback="")
-    if not x or x == "—":
-        return ""
-    x = x.strip()
-    if re.match(r"^https?://", x, flags=re.I):
-        return x
-    return ""
+# =============================
+# SEARCH: abbreviations + smart matching
+# =============================
+ABBR = {
+    # добавляйте по мере необходимости (ключи — как люди ищут)
+    "фап": ["фельдшерско-акушерский пункт", "фельдшерско акушерский пункт"],
+    "одкб": ["областная детская клиническая больница", "детская областная клиническая больница"],
+    "црб": ["центральная районная больница"],
+    "фок": ["физкультурно-оздоровительный комплекс", "физкультурно оздоровительный комплекс"],
+    "дк": ["дом культуры", "дворец культуры"],
+    "сош": ["средняя общеобразовательная школа", "школа"],
+    "оош": ["основная общеобразовательная школа"],
+    "доу": ["дошкольное образовательное учреждение", "детский сад"],
+    "мкоу": ["муниципальное казенное общеобразовательное учреждение"],
+    "мбоу": ["муниципальное бюджетное общеобразовательное учреждение"],
+}
+
+
+def expand_query_tokens(q: str) -> list[str]:
+    qn = norm_search(q)
+    if not qn:
+        return []
+    parts = qn.split()
+    out = set(parts)
+
+    # если запрос содержит сокращение — добавляем расшифровки
+    for p in parts:
+        if p in ABBR:
+            for full in ABBR[p]:
+                out.add(norm_search(full))
+
+    # если запрос написан слитно (например "фап курск") уже распадётся,
+    # но на всякий случай добавим исходный qn
+    out.add(qn)
+    return [x for x in out if x]
+
+
+def build_row_search_blob(row: pd.Series) -> str:
+    base = " ".join(
+        [
+            safe_text(row.get("name", ""), ""),
+            safe_text(row.get("object_type", ""), ""),
+            safe_text(row.get("address", ""), ""),
+            safe_text(row.get("responsible", ""), ""),
+            safe_text(row.get("sector", ""), ""),
+            safe_text(row.get("district", ""), ""),
+            safe_text(row.get("status", ""), ""),
+            safe_text(row.get("issues", ""), ""),
+        ]
+    )
+    blob = norm_search(base)
+
+    # если в названии встречаются сокращения — добавим их расшифровки в blob,
+    # чтобы поиск по "ФАП" находил объект, даже если в названии написано полностью (и наоборот)
+    words = set(blob.split())
+    for abbr, expansions in ABBR.items():
+        if abbr in words or re.search(rf"\b{re.escape(abbr)}\b", blob):
+            for full in expansions:
+                blob += " " + norm_search(full)
+        # также если в тексте есть расшифровка — добавим сокращение
+        for full in expansions:
+            if norm_search(full) in blob:
+                blob += " " + abbr
+
+    return blob
 
 
 # =============================
@@ -204,7 +281,6 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
-    # fallback local xlsx
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -229,12 +305,6 @@ def load_data() -> pd.DataFrame:
 
 
 def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Минимальная единая схема для карточек:
-    id, sector, district, name, object_type, address, responsible, status,
-    work_flag, issues, updated_at, card_url_text
-    + паспортные поля (как у вас было).
-    """
     if df.empty:
         return df
 
@@ -243,7 +313,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame()
 
-    # БАЗОВЫЕ
     out["id"] = df[col("id", "ID")] if col("id", "ID") else ""
     out["sector"] = df[col("sector", "отрасль")] if col("sector", "отрасль") else ""
     out["district"] = df[col("district", "район")] if col("district", "район") else ""
@@ -264,12 +333,12 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "updated_at", "last_update", "обновлено", "updated"
     ) else ""
 
-    # ВАЖНО: URL КАРТОЧКИ — ИЗ card_url_text (в вашем реестре там ссылка)
+    # URL КАРТОЧКИ — из card_url_text
     out["card_url_text"] = df[col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")] if col(
         "card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку"
     ) else ""
 
-    # ПАСПОРТНЫЕ ПОЛЯ
+    # Паспортные поля
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
         "state_program", "гп", "государственная программа"
     ) else ""
@@ -283,22 +352,14 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["agreement"] = df[col("agreement", "соглашение", "номер соглашения")] if col(
         "agreement", "соглашение", "номер соглашения"
     ) else ""
-    out["agreement_date"] = df[col("agreement_date", "дата соглашения")] if col(
-        "agreement_date", "дата соглашения"
-    ) else ""
-    out["agreement_amount"] = df[col("agreement_amount", "сумма соглашения")] if col(
-        "agreement_amount", "сумма соглашения"
-    ) else ""
+    out["agreement_date"] = df[col("agreement_date", "дата соглашения")] if col("agreement_date", "дата соглашения") else ""
+    out["agreement_amount"] = df[col("agreement_amount", "сумма соглашения")] if col("agreement_amount", "сумма соглашения") else ""
 
     out["capacity_seats"] = df[col("capacity_seats", "мощность", "мест", "посещений")] if col(
         "capacity_seats", "мощность", "мест", "посещений"
     ) else ""
-    out["area_m2"] = df[col("area_m2", "площадь", "м2", "кв.м")] if col(
-        "area_m2", "площадь", "м2", "кв.м"
-    ) else ""
-    out["target_deadline"] = df[col("target_deadline", "целевой срок")] if col(
-        "target_deadline", "целевой срок"
-    ) else ""
+    out["area_m2"] = df[col("area_m2", "площадь", "м2", "кв.м")] if col("area_m2", "площадь", "м2", "кв.м") else ""
+    out["target_deadline"] = df[col("target_deadline", "целевой срок")] if col("target_deadline", "целевой срок") else ""
 
     out["design"] = df[col("design", "проектирование", "псд")] if col("design", "проектирование", "псд") else ""
     out["psd_cost"] = df[col("psd_cost", "стоимость псд")] if col("psd_cost", "стоимость псд") else ""
@@ -308,20 +369,14 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["expertise_conclusion"] = df[col("expertise_conclusion", "заключение экспертизы")] if col(
         "expertise_conclusion", "заключение экспертизы"
     ) else ""
-    out["expertise_date"] = df[col("expertise_date", "дата экспертизы")] if col(
-        "expertise_date", "дата экспертизы"
-    ) else ""
+    out["expertise_date"] = df[col("expertise_date", "дата экспертизы")] if col("expertise_date", "дата экспертизы") else ""
 
     out["rns"] = df[col("rns", "рнс")] if col("rns", "рнс") else ""
     out["rns_date"] = df[col("rns_date", "дата рнс")] if col("rns_date", "дата рнс") else ""
     out["rns_expiry"] = df[col("rns_expiry", "срок действия рнс")] if col("rns_expiry", "срок действия рнс") else ""
 
-    out["contract"] = df[col("contract", "контракт", "номер контракта")] if col(
-        "contract", "контракт", "номер контракта"
-    ) else ""
-    out["contract_date"] = df[col("contract_date", "дата контракта")] if col(
-        "contract_date", "дата контракта"
-    ) else ""
+    out["contract"] = df[col("contract", "контракт", "номер контракта")] if col("contract", "контракт", "номер контракта") else ""
+    out["contract_date"] = df[col("contract_date", "дата контракта")] if col("contract_date", "дата контракта") else ""
     out["contractor"] = df[col("contractor", "подрядчик")] if col("contractor", "подрядчик") else ""
     out["contract_price"] = df[col("contract_price", "цена контракта", "стоимость контракта")] if col(
         "contract_price", "цена контракта", "стоимость контракта"
@@ -332,7 +387,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["readiness"] = df[col("readiness", "готовность")] if col("readiness", "готовность") else ""
     out["paid"] = df[col("paid", "оплачено")] if col("paid", "оплачено") else ""
 
-    # чистка
     for c in out.columns:
         out[c] = out[c].astype(str).replace({"nan": "", "None": "", "null": ""})
 
@@ -340,7 +394,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES
+# STYLES (modern + compact filters + nicer cards)
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -348,64 +402,50 @@ st.markdown(
     """
 <style>
 :root{
-  --bg: #f7f8fb;
-  --card: #ffffff;
-  --card2: rgba(15,23,42,.03);
-  --text: #0f172a;
-  --muted: rgba(15,23,42,.72);
-  --border: rgba(15,23,42,.10);
-  --shadow: rgba(0,0,0,.06);
-  --chip-bg: rgba(15,23,42,.05);
-  --chip-bd: rgba(15,23,42,.10);
-  --btn-bg: rgba(255,255,255,.95);
-  --btn-bd: rgba(15,23,42,.12);
-  --hr: rgba(15,23,42,.12);
+  --bg: #0b1220;
+  --panel: rgba(255,255,255,.06);
+  --panel2: rgba(255,255,255,.08);
+  --text: rgba(255,255,255,.92);
+  --muted: rgba(255,255,255,.72);
+  --border: rgba(255,255,255,.12);
+  --shadow: rgba(0,0,0,.35);
+  --chip: rgba(255,255,255,.07);
+  --chipbd: rgba(255,255,255,.12);
+  --btnbg: rgba(17,26,43,.85);
+  --btnbd: rgba(255,255,255,.16);
 }
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg: #0b1220;
-    --card: #111a2b;
-    --card2: rgba(255,255,255,.04);
-    --text: rgba(255,255,255,.92);
-    --muted: rgba(255,255,255,.70);
-    --border: rgba(255,255,255,.12);
-    --shadow: rgba(0,0,0,.35);
-    --chip-bg: rgba(255,255,255,.06);
-    --chip-bd: rgba(255,255,255,.12);
-    --btn-bg: rgba(17,26,43,.90);
-    --btn-bd: rgba(255,255,255,.14);
-    --hr: rgba(255,255,255,.14);
-  }
-}
-.block-container { padding-top: 24px !important; max-width: 1200px; }
+
+.block-container { padding-top: 20px !important; max-width: 1200px; }
 @media (max-width: 1200px){ .block-container { max-width: 96vw; } }
-div[data-testid="stHorizontalBlock"]{ gap: 14px; }
+div[data-testid="stHorizontalBlock"]{ gap: 12px; }
 
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
 html, body, [data-testid="stAppViewContainer"]{
-  background: var(--bg) !important;
+  background: radial-gradient(1200px 600px at 18% 10%, rgba(60,130,255,.12), rgba(0,0,0,0) 60%),
+              radial-gradient(900px 540px at 85% 30%, rgba(245,158,11,.10), rgba(0,0,0,0) 55%),
+              var(--bg) !important;
 }
 
 /* HERO */
-.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 14px; }
+.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 10px; }
 .hero{
   width: 100%;
   border-radius: 18px;
-  padding: 18px 18px;
+  padding: 16px 16px;
   background: radial-gradient(1200px 380px at 22% 30%, rgba(60,130,255,.22), rgba(0,0,0,0) 55%),
               linear-gradient(135deg, #0b2a57, #1b4c8f);
-  box-shadow: 0 18px 34px rgba(0,0,0,.18);
+  box-shadow: 0 18px 34px rgba(0,0,0,.22);
   position: relative;
   overflow: hidden;
 }
 .hero:after{
   content:"";
   position:absolute;
-  inset:-40px -120px auto auto;
-  width: 520px; height: 320px;
+  inset:-44px -140px auto auto;
+  width: 540px; height: 340px;
   background: rgba(255,255,255,.08);
   transform: rotate(14deg);
   border-radius: 32px;
@@ -418,7 +458,7 @@ html, body, [data-testid="stAppViewContainer"]{
   z-index: 2;
 }
 .hero-crest{
-  width: 74px; height: 74px;
+  width: 72px; height: 72px;
   border-radius: 14px;
   background: rgba(255,255,255,.10);
   display:flex;
@@ -428,21 +468,21 @@ html, body, [data-testid="stAppViewContainer"]{
   flex: 0 0 auto;
 }
 .hero-crest img{
-  width: 56px; height: 56px; object-fit: contain;
+  width: 54px; height: 54px; object-fit: contain;
   filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
 }
 .hero-titles{ flex: 1 1 auto; min-width: 0; }
 .hero-ministry{
   color: rgba(255,255,255,.95);
   font-weight: 900;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.15;
 }
 .hero-app{
   margin-top: 6px;
   color: rgba(255,255,255,.92);
   font-weight: 800;
-  font-size: 16px;
+  font-size: 15px;
 }
 .hero-sub{
   margin-top: 6px;
@@ -450,51 +490,110 @@ html, body, [data-testid="stAppViewContainer"]{
   font-size: 13px;
 }
 @media (max-width: 900px){
-  .hero-ministry{ font-size: 16px; }
+  .hero-ministry{ font-size: 15px; }
   .hero-row{ align-items:center; }
+}
+
+/* FILTER BAR */
+.filter-wrap{
+  margin-top: 0px;
+  margin-bottom: 14px;
+  padding: 12px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.04));
+  box-shadow: 0 10px 20px rgba(0,0,0,.20);
+}
+.filter-title{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.filter-title .left{
+  font-weight: 900;
+  letter-spacing: .2px;
+}
+.filter-title .right{
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+/* Streamlit inputs styling (select/text) */
+div[data-testid="stSelectbox"] > div{
+  border-radius: 14px !important;
+}
+div[data-testid="stTextInput"] > div{
+  border-radius: 14px !important;
+}
+div[data-baseweb="select"] > div{
+  background: rgba(255,255,255,.06) !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+}
+div[data-baseweb="input"]{
+  background: rgba(255,255,255,.06) !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+}
+div[data-baseweb="input"] input{
+  color: var(--text) !important;
+}
+div[data-baseweb="select"] span{
+  color: var(--text) !important;
+}
+label{
+  color: rgba(255,255,255,.78) !important;
+  font-weight: 800 !important;
 }
 
 /* CARD */
 .card{
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 16px;
-  box-shadow: 0 10px 22px var(--shadow);
   margin-bottom: 14px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(900px 320px at 20% 10%, rgba(60,130,255,.10), rgba(0,0,0,0) 55%),
+    radial-gradient(700px 280px at 90% 20%, rgba(245,158,11,.07), rgba(0,0,0,0) 55%),
+    linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.04));
+  box-shadow: 0 14px 26px rgba(0,0,0,.28);
   position: relative;
+  overflow: hidden;
 }
+
 .card[data-accent="green"]{
-  border-color: rgba(34,197,94,.45);
+  border-color: rgba(34,197,94,.36);
   box-shadow:
-    0 10px 22px var(--shadow),
-    -10px 0 26px rgba(34,197,94,.18),
-    inset 7px 0 0 rgba(34,197,94,.65);
+    0 14px 26px rgba(0,0,0,.28),
+    -12px 0 28px rgba(34,197,94,.14),
+    inset 8px 0 0 rgba(34,197,94,.55);
 }
 .card[data-accent="yellow"]{
-  border-color: rgba(245,158,11,.45);
+  border-color: rgba(245,158,11,.38);
   box-shadow:
-    0 10px 22px var(--shadow),
-    -10px 0 26px rgba(245,158,11,.18),
-    inset 7px 0 0 rgba(245,158,11,.65);
+    0 14px 26px rgba(0,0,0,.28),
+    -12px 0 28px rgba(245,158,11,.14),
+    inset 8px 0 0 rgba(245,158,11,.55);
 }
 .card[data-accent="red"]{
-  border-color: rgba(239,68,68,.45);
+  border-color: rgba(239,68,68,.38);
   box-shadow:
-    0 10px 22px var(--shadow),
-    -10px 0 26px rgba(239,68,68,.18),
-    inset 7px 0 0 rgba(239,68,68,.65);
+    0 14px 26px rgba(0,0,0,.28),
+    -12px 0 28px rgba(239,68,68,.14),
+    inset 8px 0 0 rgba(239,68,68,.55);
 }
 .card[data-accent="blue"]{
-  border-color: rgba(59,130,246,.40);
+  border-color: rgba(59,130,246,.32);
   box-shadow:
-    0 10px 22px var(--shadow),
-    -10px 0 26px rgba(59,130,246,.16),
-    inset 7px 0 0 rgba(59,130,246,.55);
+    0 14px 26px rgba(0,0,0,.28),
+    -12px 0 28px rgba(59,130,246,.12),
+    inset 8px 0 0 rgba(59,130,246,.48);
 }
 
 .card-title{
-  font-size: 20px;
+  font-size: 19px;
   line-height: 1.15;
   font-weight: 900;
   margin: 0 0 10px 0;
@@ -513,8 +612,8 @@ html, body, [data-testid="stAppViewContainer"]{
   gap: 8px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid var(--chip-bd);
-  background: var(--chip-bg);
+  border: 1px solid var(--chipbd);
+  background: var(--chip);
   font-size: 13px;
   color: var(--text);
   opacity: .95;
@@ -544,59 +643,76 @@ html, body, [data-testid="stAppViewContainer"]{
   gap: 8px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid var(--chip-bd);
-  background: var(--chip-bg);
+  border: 1px solid var(--chipbd);
+  background: var(--chip);
   font-size: 13px;
   color: var(--text);
   font-weight: 800;
 }
 .tag-gray{ opacity: .92; }
-.tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
-.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
-.tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
+.tag-green{ background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.20); }
+.tag-yellow{ background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.22); }
+.tag-red{ background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.20); }
 
-.card-actions{
-  display:flex;
-  gap: 12px;
-  margin-top: 12px;
-}
+.card-actions{ margin-top: 12px; }
 .a-btn{
-  flex: 1 1 0;
+  width: 100%;
   display:flex;
   justify-content:center;
   align-items:center;
   gap: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--btn-bd);
-  background: var(--btn-bg);
+  padding: 11px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--btnbd);
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
   text-decoration:none !important;
   color: var(--text) !important;
-  font-weight: 800;
+  font-weight: 900;
   font-size: 14px;
   transition: .12s ease-in-out;
 }
 .a-btn:hover{
   transform: translateY(-1px);
-  box-shadow: 0 10px 18px rgba(0,0,0,.10);
+  box-shadow: 0 12px 20px rgba(0,0,0,.25);
 }
 .a-btn.disabled{
   opacity: .45;
   pointer-events:none;
 }
 
-.section{
+/* Passport collapsible INSIDE card */
+.details{
   margin-top: 12px;
-  padding: 12px;
   border-radius: 14px;
-  border: 1px solid var(--border);
-  background: var(--card2);
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  overflow: hidden;
+}
+.details summary{
+  cursor: pointer;
+  padding: 12px 12px;
+  font-weight: 900;
+  color: var(--text);
+  list-style: none;
+}
+.details summary::-webkit-details-marker{ display:none; }
+.details .content{
+  padding: 12px 12px 14px 12px;
+  border-top: 1px dashed rgba(255,255,255,.14);
+}
+
+.section{
+  margin-top: 10px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.03);
 }
 .section-title{
   font-weight: 900;
   color: var(--text);
   margin-bottom: 8px;
-  font-size: 14px;
+  font-size: 13.5px;
 }
 .row{
   display:flex;
@@ -604,12 +720,13 @@ html, body, [data-testid="stAppViewContainer"]{
   flex-wrap: wrap;
   color: var(--text);
   font-size: 13.5px;
+  line-height: 1.35;
 }
 .row b{ color: var(--text); }
-.row .muted{ color: var(--muted); }
+.muted{ color: var(--muted); }
 
 .issue-box{
-  border: 1px solid rgba(239,68,68,.25);
+  border: 1px solid rgba(239,68,68,.22);
   background: rgba(239,68,68,.08);
   color: var(--text);
   padding: 10px 12px;
@@ -620,7 +737,6 @@ html, body, [data-testid="stAppViewContainer"]{
 @media (max-width: 900px){
   .card-grid{ grid-template-columns: 1fr; }
   .card-title{ font-size: 18px; }
-  .card-actions{ flex-direction: column; }
 }
 </style>
 """,
@@ -634,7 +750,7 @@ html, body, [data-testid="stAppViewContainer"]{
 crest_html = (
     f'<img src="data:image/png;base64,{crest_b64}" alt="Герб"/>'
     if crest_b64
-    else '<span style="color:rgba(255,255,255,.8);font-weight:800;font-size:12px;">герб</span>'
+    else '<span style="color:rgba(255,255,255,.8);font-weight:900;font-size:12px;">герб</span>'
 )
 
 st.markdown(
@@ -675,11 +791,9 @@ if APP_PASSWORD:
     if not st.session_state.auth_ok:
         st.markdown("### 🔐 Доступ к реестру")
         st.write("Введите пароль для просмотра данных.")
-
         with st.form("login_form", clear_on_submit=False):
             pwd = st.text_input("Пароль", type="password")
             submitted = st.form_submit_button("Войти")
-
         if submitted:
             if pwd == APP_PASSWORD:
                 st.session_state.auth_ok = True
@@ -695,15 +809,16 @@ if APP_PASSWORD:
 # =============================
 raw = load_data()
 if raw.empty:
-    st.error(
-        "Данные не загрузились (реестр пустой). Проверьте CSV_URL в Secrets "
-        "или наличие .xlsx в репозитории."
-    )
+    st.error("Данные не загрузились. Проверьте CSV_URL в Secrets или наличие .xlsx в репозитории.")
     st.stop()
 
 df = normalize_schema(raw)
 
-# Списки фильтров
+# подготовим поле для быстрого поиска (кешируем вычисление в памяти)
+if "search_blob" not in df.columns:
+    df["search_blob"] = df.apply(build_row_search_blob, axis=1)
+
+# списки фильтров
 sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
 districts = sorted([x for x in df["district"].unique().tolist() if str(x).strip()])
 statuses = sorted([x for x in df["status"].unique().tolist() if str(x).strip()])
@@ -716,18 +831,38 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS
+# FILTER BAR (ничего между шапкой и фильтрами)
 # =============================
-c1, c2, c3 = st.columns(3)
+st.markdown(
+    """
+<div class="filter-wrap">
+  <div class="filter-title">
+    <div class="left">🔎 Поиск и фильтры</div>
+    <div class="right">Советы: ищите по названию, адресу, ответственному или сокращениям (ФАП, ОДКБ и др.)</div>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+# сами виджеты ниже (они должны визуально "лежать" в этом блоке)
+# чтобы они выглядели частью блока — просто размещаем сразу после
+c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
-    sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
+    sector_sel = st.selectbox("Отрасль", sectors, index=0, key="f_sector")
 with c2:
-    district_sel = st.selectbox("📍 Район", districts, index=0, key="f_district")
+    district_sel = st.selectbox("Район", districts, index=0, key="f_district")
 with c3:
-    status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
+    status_sel = st.selectbox("Статус", statuses, index=0, key="f_status")
+with c4:
+    q = st.text_input("Поиск", value="", key="f_search", placeholder="Например: ФАП, ОДКБ, школа, Курский район, Иванов…").strip()
 
-q = st.text_input("🔎 Поиск (наименование / адрес / ответственный)", value="", key="f_search").strip().lower()
+# (убираем любые разделители/подписи между шапкой и фильтрами — как вы просили)
 
+
+# =============================
+# FILTERING + SMART SEARCH
+# =============================
 filtered = df.copy()
 
 if sector_sel != "Все":
@@ -737,86 +872,152 @@ if district_sel != "Все":
 if status_sel != "Все":
     filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
 
-if q:
+qn = norm_search(q)
+if qn:
+    tokens = expand_query_tokens(qn)
 
-    def row_match(r):
-        s = " ".join(
-            [
-                str(r.get("name", "")),
-                str(r.get("address", "")),
-                str(r.get("responsible", "")),
-            ]
-        ).lower()
-        return q in s
+    def match_blob(blob: str) -> bool:
+        # логика: все токены должны встретиться (AND), но токен может быть фразой
+        # это повышает точность и при этом хорошо работает для сокращений
+        for t in tokens:
+            if t and t not in blob:
+                return False
+        return True
 
-    filtered = filtered[filtered.apply(row_match, axis=1)]
+    filtered = filtered[filtered["search_blob"].apply(match_blob)]
 
-st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
-st.divider()
+# компактный счетчик (не вставляем "divider" — но показываем аккуратно)
+st.markdown(
+    f'<div style="margin:-6px 0 10px 2px; color:rgba(255,255,255,.70); font-weight:800; font-size:13px;">'
+    f'Показано: {len(filtered)} из {len(df)}'
+    f"</div>",
+    unsafe_allow_html=True,
+)
 
 
 # =============================
-# CARD RENDER
+# CARD RENDER (passport inside same contour)
 # =============================
-def render_kv(label: str, value: str):
-    st.markdown(f'<div class="row"><b>{label}:</b> {value}</div>', unsafe_allow_html=True)
+def tag_class_from_color(c: str) -> str:
+    if c == "green":
+        return "tag-green"
+    if c == "yellow":
+        return "tag-yellow"
+    if c == "red":
+        return "tag-red"
+    return "tag-gray"
+
+
+def render_row_kv(label: str, value: str) -> str:
+    return f'<div class="row"><b>{html.escape(label)}:</b> {html_escape(value)}</div>'
 
 
 def render_card(row: pd.Series):
-    title = safe_text(row.get("name", ""), fallback="Объект")
-    sector = safe_text(row.get("sector", ""), fallback="—")
-    district = safe_text(row.get("district", ""), fallback="—")
-    address = safe_text(row.get("address", ""), fallback="—")
-    responsible = safe_text(row.get("responsible", ""), fallback="—")
+    title = html_escape(row.get("name", "Объект"))
+    sector = html_escape(row.get("sector", "—"))
+    district = html_escape(row.get("district", "—"))
+    address = html_escape(row.get("address", "—"))
+    responsible = html_escape(row.get("responsible", "—"))
 
-    status = safe_text(row.get("status", ""), fallback="—")
-    work_flag = safe_text(row.get("work_flag", ""), fallback="—")
-    issues = safe_text(row.get("issues", ""), fallback="—")
+    status = safe_text(row.get("status", ""), "—")
+    work_flag = safe_text(row.get("work_flag", ""), "—")
+    issues = safe_text(row.get("issues", ""), "—")
 
-    # URL КАРТОЧКИ — строго из card_url_text
+    status_h = html.escape(status)
+    work_h = html.escape(work_flag)
+
     card_url = ensure_url(row.get("card_url_text", ""))
 
-    # Цвета
     accent = status_accent(status)
     w_col = works_color(work_flag)
     u_col, u_txt = update_color(row.get("updated_at", ""))
 
-    # теги
-    s_col = "tag-gray"
-    if accent == "green":
-        s_col = "tag-green"
-    elif accent == "yellow":
-        s_col = "tag-yellow"
-    elif accent == "red":
-        s_col = "tag-red"
+    s_tag = tag_class_from_color(accent)
+    w_tag = tag_class_from_color(w_col)
+    u_tag = tag_class_from_color(u_col)
 
-    w_tag = "tag-gray"
-    if w_col == "green":
-        w_tag = "tag-green"
-    elif w_col == "yellow":
-        w_tag = "tag-yellow"
-    elif w_col == "red":
-        w_tag = "tag-red"
-
-    u_tag = "tag-gray"
-    if u_col == "green":
-        u_tag = "tag-green"
-    elif u_col == "yellow":
-        u_tag = "tag-yellow"
-    elif u_col == "red":
-        u_tag = "tag-red"
-
-    # кнопка (ОДНА)
     btn_card = (
-        f'<a class="a-btn" href="{card_url}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
+        f'<a class="a-btn" href="{html.escape(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
         if card_url
         else '<span class="a-btn disabled">📄 Открыть карточку</span>'
     )
 
-    # ШАПКА карточки
+    # Паспорт внутри карточки (один контур)
+    issues_html = (
+        f'<div class="issue-box">{html_escape(issues)}</div>' if issues != "—" else '<div class="row"><span class="muted">—</span></div>'
+    )
+
+    passport_html = f"""
+<details class="details">
+  <summary>📋 Паспорт объекта и контрольные показатели</summary>
+  <div class="content">
+
+    <div class="section">
+      <div class="section-title">⚠️ Проблемные вопросы</div>
+      {issues_html}
+    </div>
+
+    <div class="section">
+      <div class="section-title">🏛️ Программы</div>
+      {render_row_kv("ГП/СП", row.get("state_program", ""))}
+      {render_row_kv("ФП", row.get("federal_project", ""))}
+      {render_row_kv("РП", row.get("regional_program", ""))}
+    </div>
+
+    <div class="section">
+      <div class="section-title">🧾 Соглашение</div>
+      {render_row_kv("№", row.get("agreement", ""))}
+      {render_row_kv("Дата", date_fmt(row.get("agreement_date", "")))}
+      {render_row_kv("Сумма", money_fmt(row.get("agreement_amount", "")))}
+    </div>
+
+    <div class="section">
+      <div class="section-title">📦 Параметры</div>
+      {render_row_kv("Мощность", row.get("capacity_seats", ""))}
+      {render_row_kv("Площадь", row.get("area_m2", ""))}
+      {render_row_kv("Целевой срок", date_fmt(row.get("target_deadline", "")))}
+    </div>
+
+    <div class="section">
+      <div class="section-title">🗂️ ПСД / Экспертиза</div>
+      {render_row_kv("ПСД", row.get("design", ""))}
+      {render_row_kv("Стоимость ПСД", money_fmt(row.get("psd_cost", "")))}
+      {render_row_kv("Проектировщик", row.get("designer", ""))}
+      {render_row_kv("Экспертиза", row.get("expertise", ""))}
+      {render_row_kv("Дата экспертизы", date_fmt(row.get("expertise_date", "")))}
+      {render_row_kv("Заключение", row.get("expertise_conclusion", ""))}
+    </div>
+
+    <div class="section">
+      <div class="section-title">🏗️ РНС</div>
+      {render_row_kv("№ РНС", row.get("rns", ""))}
+      {render_row_kv("Дата", date_fmt(row.get("rns_date", "")))}
+      {render_row_kv("Срок действия", date_fmt(row.get("rns_expiry", "")))}
+    </div>
+
+    <div class="section">
+      <div class="section-title">🧩 Контракт</div>
+      {render_row_kv("№", row.get("contract", ""))}
+      {render_row_kv("Дата", date_fmt(row.get("contract_date", "")))}
+      {render_row_kv("Подрядчик", row.get("contractor", ""))}
+      {render_row_kv("Цена", money_fmt(row.get("contract_price", "")))}
+    </div>
+
+    <div class="section">
+      <div class="section-title">⏳ Сроки / финансы</div>
+      {render_row_kv("Окончание (план)", date_fmt(row.get("end_date_plan", "")))}
+      {render_row_kv("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))}
+      {render_row_kv("Готовность", row.get("readiness", ""))}
+      {render_row_kv("Оплачено", money_fmt(row.get("paid", "")))}
+    </div>
+
+  </div>
+</details>
+"""
+
     st.markdown(
         f"""
-<div class="card" data-accent="{accent}">
+<div class="card" data-accent="{html.escape(accent)}">
   <div class="card-title">{title}</div>
 
   <div class="card-subchips">
@@ -830,83 +1031,20 @@ def render_card(row: pd.Series):
   </div>
 
   <div class="card-tags">
-    <span class="tag {s_col}">📌 Статус: {status}</span>
-    <span class="tag {w_tag}">🛠️ Работы: {work_flag}</span>
-    <span class="tag {u_tag}">⏱️ Обновлено: {u_txt}</span>
+    <span class="tag {s_tag}">📌 Статус: {status_h}</span>
+    <span class="tag {w_tag}">🛠️ Работы: {work_h}</span>
+    <span class="tag {u_tag}">⏱️ Обновлено: {html.escape(u_txt)}</span>
   </div>
 
   <div class="card-actions">
     {btn_card}
   </div>
+
+  {passport_html}
 </div>
 """,
         unsafe_allow_html=True,
     )
-
-    # ПАСПОРТ (свернут по умолчанию)
-    exp_label = "📋 Паспорт объекта и контрольные показатели — нажмите, чтобы раскрыть"
-    with st.expander(exp_label, expanded=False):
-        # Проблемные вопросы
-        st.markdown('<div class="section"><div class="section-title">⚠️ Проблемные вопросы</div>', unsafe_allow_html=True)
-        if issues != "—":
-            st.markdown(f'<div class="issue-box">{issues}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="row"><span class="muted">—</span></div>', unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Программы
-        st.markdown('<div class="section"><div class="section-title">🏛️ Программы</div>', unsafe_allow_html=True)
-        render_kv("ГП/СП", safe_text(row.get("state_program", ""), "—"))
-        render_kv("ФП", safe_text(row.get("federal_project", ""), "—"))
-        render_kv("РП", safe_text(row.get("regional_program", ""), "—"))
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Соглашение
-        st.markdown('<div class="section"><div class="section-title">🧾 Соглашение</div>', unsafe_allow_html=True)
-        render_kv("№", safe_text(row.get("agreement", ""), "—"))
-        render_kv("Дата", date_fmt(row.get("agreement_date", "")))
-        render_kv("Сумма", money_fmt(row.get("agreement_amount", "")))
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Параметры
-        st.markdown('<div class="section"><div class="section-title">📦 Параметры</div>', unsafe_allow_html=True)
-        render_kv("Мощность", safe_text(row.get("capacity_seats", ""), "—"))
-        render_kv("Площадь", safe_text(row.get("area_m2", ""), "—"))
-        render_kv("Целевой срок", date_fmt(row.get("target_deadline", "")))
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # ПСД / Экспертиза
-        st.markdown('<div class="section"><div class="section-title">🗂️ ПСД / Экспертиза</div>', unsafe_allow_html=True)
-        render_kv("ПСД", safe_text(row.get("design", ""), "—"))
-        render_kv("Стоимость ПСД", money_fmt(row.get("psd_cost", "")))
-        render_kv("Проектировщик", safe_text(row.get("designer", ""), "—"))
-        render_kv("Экспертиза", safe_text(row.get("expertise", ""), "—"))
-        render_kv("Дата экспертизы", date_fmt(row.get("expertise_date", "")))
-        render_kv("Заключение", safe_text(row.get("expertise_conclusion", ""), "—"))
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # РНС
-        st.markdown('<div class="section"><div class="section-title">🏗️ РНС</div>', unsafe_allow_html=True)
-        render_kv("№ РНС", safe_text(row.get("rns", ""), "—"))
-        render_kv("Дата", date_fmt(row.get("rns_date", "")))
-        render_kv("Срок действия", date_fmt(row.get("rns_expiry", "")))
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Контракт
-        st.markdown('<div class="section"><div class="section-title">🧩 Контракт</div>', unsafe_allow_html=True)
-        render_kv("№", safe_text(row.get("contract", ""), "—"))
-        render_kv("Дата", date_fmt(row.get("contract_date", "")))
-        render_kv("Подрядчик", safe_text(row.get("contractor", ""), "—"))
-        render_kv("Цена", money_fmt(row.get("contract_price", "")))
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Сроки/финансы
-        st.markdown('<div class="section"><div class="section-title">⏳ Сроки / финансы</div>', unsafe_allow_html=True)
-        render_kv("Окончание (план)", date_fmt(row.get("end_date_plan", "")))
-        render_kv("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))
-        render_kv("Готовность", safe_text(row.get("readiness", ""), "—"))
-        render_kv("Оплачено", money_fmt(row.get("paid", "")))
-        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =============================
