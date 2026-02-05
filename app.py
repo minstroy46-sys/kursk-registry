@@ -128,7 +128,7 @@ def try_parse_date(v) -> date | None:
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
-    # serial date
+    # serial date (Google/Excel)
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
@@ -271,7 +271,7 @@ def build_row_search_blob(row: pd.Series) -> str:
 # =============================
 # DATA LOADING
 # =============================
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=120)  # TTL = 2 минуты (для синхронизации без кнопки)
 def load_data() -> pd.DataFrame:
     csv_url = None
     try:
@@ -290,6 +290,7 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
+    # fallback local
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -346,6 +347,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
 
+    # Паспортные поля
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
         "state_program", "гп", "государственная программа"
     ) else ""
@@ -414,7 +416,7 @@ st.markdown(
   --text: #0f172a;
   --muted: rgba(15,23,42,.68);
 
-  /* фон не сливается: мягкий светлый + лёгкая текстура */
+  /* фон страницы */
   --page: radial-gradient(1100px 520px at 24% 18%, rgba(59,130,246,.08), rgba(0,0,0,0) 56%),
           radial-gradient(900px 480px at 78% 22%, rgba(16,185,129,.07), rgba(0,0,0,0) 56%),
           linear-gradient(180deg, #f6f8fc, #eef2f7);
@@ -489,7 +491,18 @@ html, body, [data-testid="stAppViewContainer"]{
   .hero-row{ align-items:center; }
 }
 
-/* === ВАЖНО: чтобы элементы ввода не сливались === */
+/* Панель фильтров (контур + фон + тень) */
+.filters-panel{
+  border: 1px solid rgba(15,23,42,.16);
+  border-radius: 16px;
+  padding: 12px 12px 8px 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
+  box-shadow: 0 14px 26px rgba(0,0,0,.08);
+  backdrop-filter: blur(6px);
+  margin-bottom: 8px;
+}
+
+/* поля ввода/селекты/поиск/пароль — контур и тень */
 div[data-testid="stTextInput"] input,
 div[data-testid="stSelectbox"] div[role="combobox"],
 div[data-testid="stTextInput"] div[role="textbox"]{
@@ -761,7 +774,7 @@ if APP_PASSWORD:
         st.write("Введите пароль для просмотра данных.")
 
         with st.form("login_form", clear_on_submit=False):
-            pwd = st.text_input("Пароль", type="password", placeholder="")  # без описаний внутри
+            pwd = st.text_input("Пароль", type="password", placeholder="")
             submitted = st.form_submit_button("Войти")
 
         if submitted:
@@ -800,8 +813,10 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS + SEARCH + BUTTON
+# FILTERS + SEARCH (IN PANEL)
 # =============================
+st.markdown('<div class="filters-panel">', unsafe_allow_html=True)
+
 c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
     sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
@@ -810,14 +825,10 @@ with c2:
 with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 with c4:
-    q = st.text_input("🔎 Поиск", value="", key="f_search", placeholder="").strip()  # без текста внутри
+    q = st.text_input("🔎 Поиск", value="", key="f_search", placeholder="").strip()
 
-# маленькая кнопка обновления под поиском (без описания)
-btn_c1, btn_c2, btn_c3 = st.columns([0.18, 0.62, 0.20])
-with btn_c1:
-    if st.button("↻", help="Обновить отображение (перечитать реестр)", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+st.markdown("</div>", unsafe_allow_html=True)
+
 
 # =============================
 # FILTER APPLY
@@ -897,7 +908,11 @@ def render_card(row: pd.Series):
         else '<span class="a-btn disabled">📄 Открыть карточку</span>'
     )
 
-    issues_html = f'<div class="issue-box">{esc(issues)}</div>' if issues != "—" else '<div class="row"><span class="muted">—</span></div>'
+    issues_html = (
+        f'<div class="issue-box">{esc(issues)}</div>'
+        if issues != "—"
+        else '<div class="row"><span class="muted">—</span></div>'
+    )
 
     passport_blocks = []
     passport_blocks.append(section_html("⚠️ Проблемные вопросы", issues_html, wide=True))
@@ -998,7 +1013,6 @@ def render_card(row: pd.Series):
   </div>
 
   {btn_html}
-
   {passport_html}
 </div>
 """
