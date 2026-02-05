@@ -79,7 +79,10 @@ def extract_url(value: str) -> str:
         if "docs.google.com/spreadsheets" in m:
             return m
     for m in matches:
-        if "docs.google.com" in m:
+        if "drive.google.com/drive/folders" in m:
+            return m
+    for m in matches:
+        if "docs.google.com" in m or "drive.google.com" in m:
             return m
     return matches[0]
 
@@ -502,7 +505,7 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--bg) !important;
 }
 
-.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 6px; }
+.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 0; }
 .hero{
   width: 100%;
   border-radius: 18px;
@@ -639,7 +642,7 @@ html, body, [data-testid="stAppViewContainer"]{
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
-tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
+.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
 .card-actions{
@@ -736,6 +739,19 @@ tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25)
   color: var(--muted);
   font-size: 12.5px;
 }
+.passport-btn{
+  margin-top: 8px;
+  cursor: pointer;
+  display:inline-flex;
+  align-items:center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--hr);
+  background: var(--card);
+  color: var(--text);
+  font-weight: 700;
+}
 
 .filters-title{
   font-weight: 900;
@@ -748,6 +764,7 @@ tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25)
   border-radius: 16px;
   padding: 12px 14px;
   box-shadow: 0 8px 18px var(--shadow);
+  margin-top: -4px;
   margin-bottom: 10px;
 }
 div[data-testid="stSelectbox"] > div,
@@ -875,7 +892,7 @@ with c4:
         "Поиск",
         value="",
         key="f_search",
-        placeholder="Название, адрес, оветственный, аббревиатуры (ФАП, ОДКБ, ФОК...)",
+        placeholder="Название, адрес, ответственный, аббревиатуры (ФАП, ОДКБ, ФОК...)",
     )
 st.markdown("</div>", unsafe_allow_html=True)
 q = q.strip().lower()
@@ -921,6 +938,7 @@ def render_card(row: pd.Series):
     issues = safe_text(row.get("issues", ""), fallback="—")
 
     card_url = extract_url(row.get("card_url", ""))
+    folder_url = extract_url(row.get("folder_url", ""))
 
     accent = status_accent(status)
     w_col = works_color(work_flag)
@@ -950,8 +968,9 @@ def render_card(row: pd.Series):
     elif u_col == "red":
         u_tag = "tag-red"
 
-    if card_url and card_url != "—" and str(card_url).startswith("http"):
-        btn_card = f'<a class="a-btn" href="{card_url}" target="_blank" rel="noopener">📄 Открыть карточку</a>'
+    link_url = card_url if card_url and str(card_url).startswith("http") else folder_url
+    if link_url and link_url != "—" and str(link_url).startswith("http"):
+        btn_card = f'<a class="a-btn" href="{link_url}" target="_blank" rel="noopener">📄 Открыть карточку</a>'
     else:
         btn_card = '<span class="a-btn disabled">📄 Открыть карточку</span>'
 
@@ -1056,7 +1075,9 @@ def render_card(row: pd.Series):
   {section("🏗️ РНС", rns_block)}
   {section("🧩 Контракт", contract_block)}
   {section("⏳ Сроки / финансы", timeline_block)}
-  <div class="passport-hint">⬆️ Нажмите заголовок «Паспорт…», чтобы свернуть</div>
+  <div class="passport-hint">
+    <button type="button" class="passport-btn" onclick="this.closest('details').open=false">⬆️ Свернуть паспорт</button>
+  </div>
 </details>
 """
     st.markdown(passport_html, unsafe_allow_html=True)
