@@ -3,6 +3,7 @@ import html
 import re
 from datetime import datetime, date
 from pathlib import Path
+from textwrap import dedent
 
 import pandas as pd
 import streamlit as st
@@ -271,7 +272,7 @@ def build_row_search_blob(row: pd.Series) -> str:
 # =============================
 # DATA LOADING
 # =============================
-@st.cache_data(show_spinner=False, ttl=120)  # 2 мин: авто-подтяжка без кнопки
+@st.cache_data(show_spinner=False, ttl=120)
 def load_data() -> pd.DataFrame:
     csv_url = None
     try:
@@ -290,7 +291,6 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
-    # fallback local
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -405,381 +405,310 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (добавили “воздух”, ровные строки с иконками, паспорт внутри контура)
+# STYLES
 # =============================
 crest_b64 = read_local_crest_b64()
 
 st.markdown(
-    """
-<style>
-:root{
-  --text: #0f172a;
-  --muted: rgba(15,23,42,.70);
-  --page: radial-gradient(1100px 520px at 24% 18%, rgba(59,130,246,.08), rgba(0,0,0,0) 56%),
-          radial-gradient(900px 480px at 78% 22%, rgba(16,185,129,.07), rgba(0,0,0,0) 56%),
-          linear-gradient(180deg, #f6f8fc, #eef2f7);
-  --border: rgba(15,23,42,.14);
-  --border-strong: rgba(15,23,42,.20);
-  --shadow: rgba(0,0,0,.07);
+    dedent(
+        """
+        <style>
+        :root{
+          --text: #0f172a;
+          --muted: rgba(15,23,42,.70);
+          --page: radial-gradient(1100px 520px at 24% 18%, rgba(59,130,246,.08), rgba(0,0,0,0) 56%),
+                  radial-gradient(900px 480px at 78% 22%, rgba(16,185,129,.07), rgba(0,0,0,0) 56%),
+                  linear-gradient(180deg, #f6f8fc, #eef2f7);
+          --border: rgba(15,23,42,.14);
+          --border-strong: rgba(15,23,42,.20);
+          --shadow: rgba(0,0,0,.07);
 
-  --chip-bg: rgba(15,23,42,.05);
-  --chip-bd: rgba(15,23,42,.10);
+          --chip-bg: rgba(15,23,42,.05);
+          --chip-bd: rgba(15,23,42,.10);
 
-  --soft: linear-gradient(180deg, rgba(255,255,255,.98), rgba(245,248,255,.98));
-  --soft2: linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,255,.98));
+          --soft: linear-gradient(180deg, rgba(255,255,255,.98), rgba(245,248,255,.98));
+          --soft2: linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,255,.98));
 
-  --btn-bg: rgba(255,255,255,.96);
-  --btn-bd: rgba(15,23,42,.18);
-  --btn-shadow: rgba(0,0,0,.08);
+          --btn-bg: rgba(255,255,255,.96);
+          --btn-bd: rgba(15,23,42,.18);
+          --btn-shadow: rgba(0,0,0,.08);
 
-  --pad: 20px;
-}
+          --pad: 20px;
+        }
 
-.block-container { padding-top: 24px !important; max-width: 1200px; }
-@media (max-width: 1200px){ .block-container { max-width: 96vw; } }
-div[data-testid="stHorizontalBlock"]{ gap: 14px; }
+        .block-container { padding-top: 24px !important; max-width: 1200px; }
+        @media (max-width: 1200px){ .block-container { max-width: 96vw; } }
+        div[data-testid="stHorizontalBlock"]{ gap: 14px; }
 
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
 
-html, body, [data-testid="stAppViewContainer"]{
-  background: var(--page) !important;
-}
+        html, body, [data-testid="stAppViewContainer"]{
+          background: var(--page) !important;
+        }
 
-/* фикс текста на мобильном */
-html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{ color: var(--text); }
-p, span, li, div, small { color: var(--text); }
-.stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
-label, [data-testid="stWidgetLabel"] *{ color: var(--text) !important; opacity: 1 !important; }
-h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
+        html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{ color: var(--text); }
+        p, span, li, div, small { color: var(--text); }
+        .stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
+        label, [data-testid="stWidgetLabel"] *{ color: var(--text) !important; opacity: 1 !important; }
+        h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
 
-/* HERO */
-.hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 10px; }
-.hero{
-  width: 100%;
-  border-radius: 18px;
-  padding: 18px 18px;
-  background: radial-gradient(1200px 380px at 22% 30%, rgba(60,130,255,.22), rgba(0,0,0,0) 55%),
-              linear-gradient(135deg, #0b2a57, #1b4c8f);
-  box-shadow: 0 18px 34px rgba(0,0,0,.18);
-  position: relative;
-  overflow: hidden;
-}
-.hero:after{
-  content:"";
-  position:absolute;
-  inset:-40px -120px auto auto;
-  width: 520px; height: 320px;
-  background: rgba(255,255,255,.08);
-  transform: rotate(14deg);
-  border-radius: 32px;
-}
-.hero-row{ display:flex; align-items:flex-start; gap: 16px; position: relative; z-index: 2; }
-.hero-crest{
-  width: 74px; height: 74px;
-  border-radius: 14px;
-  background: rgba(255,255,255,.10);
-  display:flex; align-items:center; justify-content:center;
-  border: 1px solid rgba(255,255,255,.16);
-  flex: 0 0 auto;
-}
-.hero-crest img{
-  width: 56px; height: 56px; object-fit: contain;
-  filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
-}
-.hero-titles{ flex: 1 1 auto; min-width: 0; }
-.hero-ministry{ color: rgba(255,255,255,.95) !important; font-weight: 900; font-size: 20px; line-height: 1.15; }
-.hero-app{ margin-top: 6px; color: rgba(255,255,255,.92) !important; font-weight: 800; font-size: 16px; }
-.hero-sub{ margin-top: 6px; color: rgba(255,255,255,.78) !important; font-size: 13px; }
-@media (max-width: 900px){
-  .hero-ministry{ font-size: 16px; }
-  .hero-row{ align-items:center; }
-}
+        /* HERO */
+        .hero-wrap{ width:100%; display:flex; justify-content:center; margin-bottom: 10px; }
+        .hero{
+          width: 100%;
+          border-radius: 18px;
+          padding: 18px 18px;
+          background: radial-gradient(1200px 380px at 22% 30%, rgba(60,130,255,.22), rgba(0,0,0,0) 55%),
+                      linear-gradient(135deg, #0b2a57, #1b4c8f);
+          box-shadow: 0 18px 34px rgba(0,0,0,.18);
+          position: relative;
+          overflow: hidden;
+        }
+        .hero:after{
+          content:"";
+          position:absolute;
+          inset:-40px -120px auto auto;
+          width: 520px; height: 320px;
+          background: rgba(255,255,255,.08);
+          transform: rotate(14deg);
+          border-radius: 32px;
+        }
+        .hero-row{ display:flex; align-items:flex-start; gap: 16px; position: relative; z-index: 2; }
+        .hero-crest{
+          width: 74px; height: 74px;
+          border-radius: 14px;
+          background: rgba(255,255,255,.10);
+          display:flex; align-items:center; justify-content:center;
+          border: 1px solid rgba(255,255,255,.16);
+          flex: 0 0 auto;
+        }
+        .hero-crest img{
+          width: 56px; height: 56px; object-fit: contain;
+          filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+        }
+        .hero-titles{ flex: 1 1 auto; min-width: 0; }
+        .hero-ministry{ color: rgba(255,255,255,.95) !important; font-weight: 900; font-size: 20px; line-height: 1.15; }
+        .hero-app{ margin-top: 6px; color: rgba(255,255,255,.92) !important; font-weight: 800; font-size: 16px; }
+        .hero-sub{ margin-top: 6px; color: rgba(255,255,255,.78) !important; font-size: 13px; }
+        @media (max-width: 900px){
+          .hero-ministry{ font-size: 16px; }
+          .hero-row{ align-items:center; }
+        }
 
-/* Панели фильтров */
-div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
-  background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
-  border: 1px solid rgba(15,23,42,.16);
-  border-radius: 16px;
-  padding: 10px 10px 6px 10px;
-  box-shadow: 0 14px 26px rgba(0,0,0,.08);
-}
-div[data-testid="stTextInput"] input,
-div[data-testid="stSelectbox"] div[role="combobox"]{
-  border: 1px solid var(--border-strong) !important;
-  box-shadow: 0 10px 18px rgba(0,0,0,.06) !important;
-  background: rgba(255,255,255,.96) !important;
-  border-radius: 12px !important;
-}
+        /* Панели фильтров */
+        div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
+          background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
+          border: 1px solid rgba(15,23,42,.16);
+          border-radius: 16px;
+          padding: 10px 10px 6px 10px;
+          box-shadow: 0 14px 26px rgba(0,0,0,.08);
+        }
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stSelectbox"] div[role="combobox"]{
+          border: 1px solid var(--border-strong) !important;
+          box-shadow: 0 10px 18px rgba(0,0,0,.06) !important;
+          background: rgba(255,255,255,.96) !important;
+          border-radius: 12px !important;
+        }
 
-/* Карточка — больше воздуха */
-.card{
-  background:
-    radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.08), rgba(0,0,0,0) 55%),
-    radial-gradient(700px 260px at 92% 18%, rgba(16,185,129,.06), rgba(0,0,0,0) 55%),
-    linear-gradient(180deg, #ffffff, #f4f8ff);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: var(--pad);
-  box-shadow: 0 12px 26px var(--shadow);
-  margin-bottom: 16px;
-  position: relative;
-  overflow: hidden;
-}
+        /* Карточка */
+        .card{
+          background:
+            radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.08), rgba(0,0,0,0) 55%),
+            radial-gradient(700px 260px at 92% 18%, rgba(16,185,129,.06), rgba(0,0,0,0) 55%),
+            linear-gradient(180deg, #ffffff, #f4f8ff);
+          border: 1px solid var(--border);
+          border-radius: 18px;
+          padding: var(--pad);
+          box-shadow: 0 12px 26px var(--shadow);
+          margin-bottom: 16px;
+          position: relative;
+          overflow: hidden;
+        }
+        .card[data-accent="green"]{
+          border-color: rgba(34,197,94,.32);
+          box-shadow: 0 12px 26px var(--shadow), inset 12px 0 0 rgba(34,197,94,.52);
+        }
+        .card[data-accent="yellow"]{
+          border-color: rgba(245,158,11,.34);
+          box-shadow: 0 12px 26px var(--shadow), inset 12px 0 0 rgba(245,158,11,.56);
+        }
+        .card[data-accent="red"]{
+          border-color: rgba(239,68,68,.34);
+          box-shadow: 0 12px 26px var(--shadow), inset 12px 0 0 rgba(239,68,68,.56);
+        }
+        .card[data-accent="blue"]{
+          border-color: rgba(59,130,246,.30);
+          box-shadow: 0 12px 26px var(--shadow), inset 12px 0 0 rgba(59,130,246,.50);
+        }
 
-/* левый акцент мягче, но выразительный */
-.card[data-accent="green"]{
-  border-color: rgba(34,197,94,.32);
-  box-shadow: 0 12px 26px var(--shadow),
-              inset 12px 0 0 rgba(34,197,94,.52);
-}
-.card[data-accent="yellow"]{
-  border-color: rgba(245,158,11,.34);
-  box-shadow: 0 12px 26px var(--shadow),
-              inset 12px 0 0 rgba(245,158,11,.56);
-}
-.card[data-accent="red"]{
-  border-color: rgba(239,68,68,.34);
-  box-shadow: 0 12px 26px var(--shadow),
-              inset 12px 0 0 rgba(239,68,68,.56);
-}
-.card[data-accent="blue"]{
-  border-color: rgba(59,130,246,.30);
-  box-shadow: 0 12px 26px var(--shadow),
-              inset 12px 0 0 rgba(59,130,246,.50);
-}
+        .card-head{ display:flex; flex-direction:column; gap: 10px; }
+        .card-title{ font-size: 20px; line-height: 1.18; font-weight: 950; margin: 0; color: var(--text) !important; }
+        .card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
+        .chip{
+          display:inline-flex; align-items:center; gap: 8px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          border: 1px solid var(--chip-bd);
+          background: var(--chip-bg);
+          font-size: 13px;
+          color: var(--text) !important;
+          font-weight: 800;
+        }
 
-.card-head{ display:flex; flex-direction:column; gap: 10px; }
-.card-title{
-  font-size: 20px;
-  line-height: 1.18;
-  font-weight: 950;
-  margin: 0;
-  color: var(--text) !important;
-}
-.card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
-.chip{
-  display:inline-flex; align-items:center; gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--chip-bd);
-  background: var(--chip-bg);
-  font-size: 13px;
-  color: var(--text) !important;
-  font-weight: 800;
-}
+        /* Ровные строки адрес/ответственный */
+        .info-grid{
+          margin-top: 2px;
+          display:grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px 14px;
+        }
+        .info-item{
+          display:flex;
+          gap: 10px;
+          align-items:flex-start;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(15,23,42,.12);
+          background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(245,248,255,.92));
+        }
+        .ico{
+          width: 30px; height: 30px;
+          border-radius: 10px;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          border: 1px solid rgba(15,23,42,.10);
+          background: rgba(15,23,42,.05);
+          font-size: 16px;
+          flex: 0 0 auto;
+        }
+        .itxt{ min-width: 0; }
+        .ilbl{ font-size: 12px; font-weight: 900; color: var(--muted) !important; letter-spacing: .2px; }
+        .ival{
+          margin-top: 2px;
+          font-size: 14px;
+          font-weight: 800;
+          line-height: 1.25;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+        }
 
-/* РОВНЫЕ строки с иконками: адрес/ответственный */
-.info-grid{
-  margin-top: 2px;
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 14px;
-}
-.info-item{
-  display:flex;
-  gap: 10px;
-  align-items:flex-start;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.12);
-  background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(245,248,255,.92));
-}
-.ico{
-  width: 30px; height: 30px;
-  border-radius: 10px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border: 1px solid rgba(15,23,42,.10);
-  background: rgba(15,23,42,.05);
-  font-size: 16px;
-  flex: 0 0 auto;
-}
-.itxt{ min-width: 0; }
-.ilbl{
-  font-size: 12px;
-  font-weight: 900;
-  color: var(--muted) !important;
-  letter-spacing: .2px;
-}
-.ival{
-  margin-top: 2px;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.25;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
+        /* Тэги */
+        .card-tags{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+        .tag{
+          display:inline-flex; align-items:center; gap: 8px;
+          padding: 7px 11px;
+          border-radius: 999px;
+          border: 1px solid var(--chip-bd);
+          background: var(--chip-bg);
+          font-size: 13px;
+          color: var(--text) !important;
+          font-weight: 900;
+        }
+        .tag-gray{ opacity: .92; }
+        .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
+        .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
+        .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
-/* Тэги статуса/работ/обновления */
-.card-tags{
-  display:flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
-.tag{
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-  padding: 7px 11px;
-  border-radius: 999px;
-  border: 1px solid var(--chip-bd);
-  background: var(--chip-bg);
-  font-size: 13px;
-  color: var(--text) !important;
-  font-weight: 900;
-}
-.tag-gray{ opacity: .92; }
-.tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
-.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
-.tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
+        /* Кнопка */
+        .a-btn{
+          width: 100%;
+          display:flex; justify-content:center; align-items:center; gap: 8px;
+          padding: 11px 12px;
+          border-radius: 14px;
+          border: 1px solid var(--btn-bd);
+          background: var(--btn-bg);
+          text-decoration:none !important;
+          color: var(--text) !important;
+          font-weight: 950;
+          font-size: 14px;
+          transition: .12s ease-in-out;
+          margin-top: 14px;
+          box-shadow: 0 10px 18px var(--btn-shadow);
+        }
+        .a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
+        .a-btn.disabled{ opacity: .45; pointer-events:none; }
 
-/* Кнопка открыть карточку */
-.a-btn{
-  width: 100%;
-  display:flex; justify-content:center; align-items:center; gap: 8px;
-  padding: 11px 12px;
-  border-radius: 14px;
-  border: 1px solid var(--btn-bd);
-  background: var(--btn-bg);
-  text-decoration:none !important;
-  color: var(--text) !important;
-  font-weight: 950;
-  font-size: 14px;
-  transition: .12s ease-in-out;
-  margin-top: 14px;
-  box-shadow: 0 10px 18px var(--btn-shadow);
-}
-.a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
-.a-btn.disabled{ opacity: .45; pointer-events:none; }
+        /* Паспорт внутри общего контура */
+        .passport{ margin-top: 14px; border-top: 1px solid rgba(15,23,42,.12); padding-top: 10px; }
+        .passport-toggle{ position:absolute; opacity:0; pointer-events:none; }
+        .passport-summary{
+          cursor: pointer;
+          padding: 10px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(15,23,42,.12);
+          background: linear-gradient(180deg, rgba(255,255,255,.88), rgba(245,248,255,.92));
+          font-weight: 950;
+          display:flex; align-items:center; gap: 10px;
+          user-select: none;
+        }
+        .passport-summary:before{ content:"▸"; font-weight: 950; opacity:.75; }
+        .passport-toggle:checked + .passport-summary:before{ content:"▾"; }
+        .passport-body{
+          display:none;
+          margin-top: 10px;
+          padding: 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(15,23,42,.12);
+          background: var(--soft2);
+        }
+        .passport-toggle:checked ~ .passport-body{ display:block; }
 
-/* Паспорт ВНУТРИ общего контура: без “второй карточки”, только мягкая секция */
-.passport{
-  margin-top: 14px;
-  border-top: 1px solid rgba(15,23,42,.12);
-  padding-top: 10px;
-}
-.passport-toggle{
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-.passport-summary{
-  cursor: pointer;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.12);
-  background: linear-gradient(180deg, rgba(255,255,255,.88), rgba(245,248,255,.92));
-  font-weight: 950;
-  color: var(--text) !important;
-  display:flex;
-  align-items:center;
-  gap: 10px;
-  user-select: none;
-}
-.passport-summary:before{
-  content: "▸";
-  font-weight: 950;
-  opacity: .75;
-}
-.passport-toggle:checked + .passport-summary:before{
-  content: "▾";
-}
-.passport-body{
-  display: none;
-  margin-top: 10px;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.12);
-  background: var(--soft2);
-}
-.passport-toggle:checked ~ .passport-body{ display: block; }
+        .passport-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .section-wide{ grid-column: 1 / -1; }
+        .section{
+          padding: 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(15,23,42,.12);
+          background: var(--soft);
+        }
+        .section-title{ font-weight: 950; margin-bottom: 8px; font-size: 14px; }
+        .row{
+          display:flex; gap: 10px; flex-wrap: wrap;
+          font-size: 13.5px; line-height: 1.35;
+          word-break: break-word; overflow-wrap: anywhere;
+        }
+        .row .muted{ color: var(--muted) !important; }
+        .issue-box{
+          border: 1px solid rgba(239,68,68,.22);
+          background: rgba(239,68,68,.07);
+          padding: 10px 12px;
+          border-radius: 12px;
+          font-size: 13.5px;
+          line-height: 1.35;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+        }
 
-/* 2 колонки секций */
-.passport-grid{
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-.section-wide{ grid-column: 1 / -1; }
+        .passport-close{ display:none; justify-content:center; margin-top: 10px; }
+        .passport-toggle:checked ~ .passport-close{ display:flex; }
+        .passport-close-btn{
+          width: 34px; height: 34px;
+          border-radius: 999px;
+          border: 1px solid rgba(15,23,42,.18);
+          background: rgba(255,255,255,.92);
+          font-weight: 950;
+          display:flex; align-items:center; justify-content:center;
+          box-shadow: 0 10px 18px rgba(0,0,0,.08);
+          cursor: pointer;
+          user-select: none;
+        }
+        .passport-close-btn:hover{
+          transform: translateY(-1px);
+          box-shadow: 0 14px 22px rgba(0,0,0,.10);
+        }
 
-.section{
-  margin-top: 0;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.12);
-  background: var(--soft);
-}
-.section-title{
-  font-weight: 950;
-  color: var(--text) !important;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-.row{
-  display:flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  color: var(--text) !important;
-  font-size: 13.5px;
-  line-height: 1.35;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-.row b{ color: var(--text) !important; }
-.row .muted{ color: var(--muted) !important; }
-
-.issue-box{
-  border: 1px solid rgba(239,68,68,.22);
-  background: rgba(239,68,68,.07);
-  color: var(--text) !important;
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-size: 13.5px;
-  line-height: 1.35;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-
-/* кнопка “свернуть” — аккуратно, внутри паспорта */
-.passport-close{
-  display: none;
-  justify-content:center;
-  margin-top: 10px;
-}
-.passport-toggle:checked ~ .passport-close{ display:flex; }
-.passport-close-btn{
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  border: 1px solid rgba(15,23,42,.18);
-  background: rgba(255,255,255,.92);
-  color: var(--text) !important;
-  font-weight: 950;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  line-height: 1;
-  transition: .12s ease-in-out;
-  cursor: pointer;
-  user-select: none;
-  box-shadow: 0 10px 18px rgba(0,0,0,.08);
-}
-.passport-close-btn:hover{
-  transform: translateY(-1px);
-  box-shadow: 0 14px 22px rgba(0,0,0,.10);
-}
-
-@media (max-width: 900px){
-  .card-title{ font-size: 18px; }
-  .info-grid{ grid-template-columns: 1fr; }
-  .passport-grid{ grid-template-columns: 1fr; }
-}
-</style>
-""",
+        @media (max-width: 900px){
+          .card-title{ font-size: 18px; }
+          .info-grid{ grid-template-columns: 1fr; }
+          .passport-grid{ grid-template-columns: 1fr; }
+        }
+        </style>
+        """
+    ),
     unsafe_allow_html=True,
 )
 
@@ -794,20 +723,22 @@ crest_html = (
 )
 
 st.markdown(
-    f"""
-<div class="hero-wrap">
-  <div class="hero">
-    <div class="hero-row">
-      <div class="hero-crest">{crest_html}</div>
-      <div class="hero-titles">
-        <div class="hero-ministry">Министерство восстановления, развития приграничья и строительства Курской области</div>
-        <div class="hero-app">Реестр объектов</div>
-        <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку.</div>
-      </div>
-    </div>
-  </div>
-</div>
-""",
+    dedent(
+        f"""
+        <div class="hero-wrap">
+          <div class="hero">
+            <div class="hero-row">
+              <div class="hero-crest">{crest_html}</div>
+              <div class="hero-titles">
+                <div class="hero-ministry">Министерство восстановления, развития приграничья и строительства Курской области</div>
+                <div class="hero-app">Реестр объектов</div>
+                <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        """
+    ),
     unsafe_allow_html=True,
 )
 
@@ -895,206 +826,4 @@ if sector_sel != "Все":
 if district_sel != "Все":
     filtered = filtered[filtered["district"].astype(str) == str(district_sel)]
 if status_sel != "Все":
-    filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
-
-qn = norm_search(q)
-if qn:
-    tokens = expand_query_tokens(qn)
-
-    def match_blob(blob: str) -> bool:
-        for t in tokens:
-            if t and t not in blob:
-                return False
-        return True
-
-    filtered = filtered[filtered["search_blob"].apply(match_blob)]
-
-st.caption(f"Показано объектов: {len(filtered)} из {len(df)}")
-st.divider()
-
-
-# =============================
-# CARD RENDER (HTML)
-# =============================
-def tag_class(color: str) -> str:
-    if color == "green":
-        return "tag-green"
-    if color == "yellow":
-        return "tag-yellow"
-    if color == "red":
-        return "tag-red"
-    return "tag-gray"
-
-
-def kv_html(label: str, value) -> str:
-    return f'<div class="row"><b>{esc(label)}:</b> {esc(value)}</div>'
-
-
-def section_html(title: str, inner_html: str, wide: bool = False) -> str:
-    cls = "section section-wide" if wide else "section"
-    return f'<div class="{cls}"><div class="section-title">{esc(title)}</div>{inner_html}</div>'
-
-
-def render_card(row: pd.Series):
-    title_txt = safe_text(row.get("name", "Объект"))
-    title = esc(title_txt)
-    sector = esc(row.get("sector", "—"))
-    district = esc(row.get("district", "—"))
-    address = esc(row.get("address", "—"))
-    responsible = esc(row.get("responsible", "—"))
-
-    status = safe_text(row.get("status", ""), "—")
-    work_flag = safe_text(row.get("work_flag", ""), "—")
-    issues = safe_text(row.get("issues", ""), "—")
-
-    accent = status_accent(status)
-    w_col = works_color(work_flag)
-    u_col, u_txt = update_color(row.get("updated_at", ""))
-
-    s_cls = tag_class(accent)
-    w_cls = tag_class(w_col)
-    u_cls = tag_class(u_col)
-
-    card_url = ensure_url(row.get("card_url_text", ""))
-
-    btn_html = (
-        f'<a class="a-btn" href="{esc(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
-        if card_url
-        else '<span class="a-btn disabled">📄 Открыть карточку</span>'
-    )
-
-    issues_html = (
-        f'<div class="issue-box">{esc(issues)}</div>'
-        if issues != "—"
-        else '<div class="row"><span class="muted">—</span></div>'
-    )
-
-    passport_blocks = []
-    passport_blocks.append(section_html("⚠️ Проблемные вопросы", issues_html, wide=True))
-
-    prog = (
-        kv_html("ГП/СП", row.get("state_program", "—"))
-        + kv_html("ФП", row.get("federal_project", "—"))
-        + kv_html("РП", row.get("regional_program", "—"))
-    )
-    passport_blocks.append(section_html("🏛️ Программы", prog))
-
-    agr = (
-        kv_html("№", row.get("agreement", "—"))
-        + kv_html("Дата", date_fmt(row.get("agreement_date", "")))
-        + kv_html("Сумма", money_fmt(row.get("agreement_amount", "")))
-    )
-    passport_blocks.append(section_html("🧾 Соглашение", agr))
-
-    params = (
-        kv_html("Мощность", row.get("capacity_seats", "—"))
-        + kv_html("Площадь", row.get("area_m2", "—"))
-        + kv_html("Целевой срок", date_fmt(row.get("target_deadline", "")))
-    )
-    passport_blocks.append(section_html("📦 Параметры", params))
-
-    psd = (
-        kv_html("ПСД", row.get("design", "—"))
-        + kv_html("Стоимость ПСД", money_fmt(row.get("psd_cost", "")))
-        + kv_html("Проектировщик", row.get("designer", "—"))
-        + kv_html("Экспертиза", row.get("expertise", "—"))
-        + kv_html("Дата экспертизы", date_fmt(row.get("expertise_date", "")))
-        + kv_html("Заключение", row.get("expertise_conclusion", "—"))
-    )
-    passport_blocks.append(section_html("🗂️ ПСД / Экспертиза", psd))
-
-    rns_block = (
-        kv_html("№ РНС", row.get("rns", "—"))
-        + kv_html("Дата", date_fmt(row.get("rns_date", "")))
-        + kv_html("Срок действия", date_fmt(row.get("rns_expiry", "")))
-    )
-    passport_blocks.append(section_html("🏗️ РНС", rns_block))
-
-    contr = (
-        kv_html("№", row.get("contract", "—"))
-        + kv_html("Дата", date_fmt(row.get("contract_date", "")))
-        + kv_html("Подрядчик", row.get("contractor", "—"))
-        + kv_html("Цена", money_fmt(row.get("contract_price", "")))
-    )
-    passport_blocks.append(section_html("🧩 Контракт", contr))
-
-    terms = (
-        kv_html("Окончание (план)", date_fmt(row.get("end_date_plan", "")))
-        + kv_html("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))
-        + kv_html("Готовность", readiness_fmt(row.get("readiness", "")))
-        + kv_html("Оплачено", money_fmt(row.get("paid", "")))
-    )
-    passport_blocks.append(section_html("⏳ Сроки / финансы", terms))
-
-    rid = safe_text(row.get("id", ""), fallback="").strip()
-    if not rid:
-        rid = f"row_{abs(hash(title_txt))}"
-    rid = re.sub(r"[^a-zA-Z0-9_]+", "_", rid)
-    toggle_id = f"passport_{rid}"
-
-    passport_html = (
-        f'<div class="passport">'
-        f'  <input class="passport-toggle" type="checkbox" id="{toggle_id}">'
-        f'  <label class="passport-summary" for="{toggle_id}">📋 Паспорт объекта и контрольные показатели</label>'
-        f'  <div class="passport-body">'
-        f'    <div class="passport-grid">'
-        + "".join(passport_blocks) +
-        f'    </div>'
-        f'    <div class="passport-close">'
-        f'      <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>'
-        f'    </div>'
-        f'  </div>'
-        f'</div>'
-    )
-
-    info_html = f"""
-<div class="info-grid">
-  <div class="info-item">
-    <div class="ico">🗺️</div>
-    <div class="itxt">
-      <div class="ilbl">Адрес</div>
-      <div class="ival">{address}</div>
-    </div>
-  </div>
-  <div class="info-item">
-    <div class="ico">👤</div>
-    <div class="itxt">
-      <div class="ilbl">Ответственный</div>
-      <div class="ival">{responsible}</div>
-    </div>
-  </div>
-</div>
-"""
-
-    card_html = f"""
-<div class="card" data-accent="{esc(accent)}">
-  <div class="card-head">
-    <div class="card-title">{title}</div>
-
-    <div class="card-subchips">
-      <span class="chip">🏷️ {sector}</span>
-      <span class="chip">📍 {district}</span>
-    </div>
-
-    {info_html}
-
-    <div class="card-tags">
-      <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
-      <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
-      <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
-    </div>
-
-    {btn_html}
-
-    {passport_html}
-  </div>
-</div>
-"""
-    st.markdown(card_html, unsafe_allow_html=True)
-
-
-# =============================
-# OUTPUT
-# =============================
-for _, r in filtered.iterrows():
-    render_card(r)
+    filtered = fi
