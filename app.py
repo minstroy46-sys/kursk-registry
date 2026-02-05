@@ -128,7 +128,6 @@ def try_parse_date(v) -> date | None:
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
-    # serial number (Excel/Sheets)
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
@@ -183,6 +182,55 @@ def date_fmt(v) -> str:
     return d.strftime("%d.%m.%Y") if d else "—"
 
 
+def num_fmt(v) -> str:
+    s = safe_text(v, fallback="—")
+    if s == "—":
+        return s
+    try:
+        x = str(s).replace(" ", "").replace("\u00A0", "").replace(",", ".")
+        x = float(x)
+        if x.is_integer():
+            return f"{int(x):,}".replace(",", " ")
+        return f"{x:,.2f}".replace(",", " ")
+    except Exception:
+        return s
+
+
+def readiness_fmt(v) -> str:
+    """
+    Нормализует готовность:
+    - 0.38 / 0,38 -> 38%
+    - 38 -> 38%
+    - 38% -> 38%
+    - пусто -> —
+    """
+    s = safe_text(v, fallback="—")
+    if s == "—":
+        return "—"
+    s0 = str(s).strip()
+    if not s0:
+        return "—"
+    if "%" in s0:
+        return s0.replace(" ", "")
+
+    # пробуем число
+    try:
+        x = str(s0).replace(" ", "").replace("\u00A0", "").replace(",", ".")
+        x = float(x)
+        if 0 <= x <= 1:
+            p = x * 100
+        else:
+            p = x
+
+        # красивое форматирование
+        if abs(p - round(p)) < 1e-9:
+            return f"{int(round(p))}%"
+        # одна цифра после запятой
+        return f"{p:.1f}".replace(".", ",") + "%"
+    except Exception:
+        return s0
+
+
 def norm_search(s: str) -> str:
     s = safe_text(s, fallback="")
     s = s.lower().replace("ё", "е")
@@ -235,7 +283,6 @@ def build_row_search_blob(row: pd.Series) -> str:
     )
     blob = norm_search(base)
 
-    # двусторонняя поддержка сокращений
     for abbr, expansions in ABBR.items():
         for full in expansions:
             full_n = norm_search(full)
@@ -270,7 +317,6 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 df = pd.DataFrame()
 
-    # fallback local
     if df.empty:
         candidates = [
             "РЕЕСТР_объектов_Курская_область_2025-2028.xlsx",
@@ -323,12 +369,10 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "updated_at", "last_update", "обновлено", "updated"
     ) else ""
 
-    # ссылка для кнопки: строго card_url_text
     out["card_url_text"] = df[
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
 
-    # Паспортные поля
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
         "state_program", "гп", "государственная программа"
     ) else ""
@@ -386,7 +430,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (светлая база + герой; карточка полностью внутри контура)
+# STYLES
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -395,7 +439,6 @@ st.markdown(
 <style>
 :root{
   --bg: #f7f8fb;
-  --card: #ffffff;
   --text: #0f172a;
   --muted: rgba(15,23,42,.72);
   --border: rgba(15,23,42,.10);
@@ -405,6 +448,10 @@ st.markdown(
   --btn-bg: rgba(255,255,255,.95);
   --btn-bd: rgba(15,23,42,.12);
   --hr: rgba(15,23,42,.12);
+
+  /* Новый мягкий фон секций (не белый) */
+  --soft: linear-gradient(180deg, rgba(250,252,255,.96), rgba(244,247,255,.96));
+  --soft2: linear-gradient(180deg, rgba(255,255,255,.90), rgba(246,248,255,.92));
 }
 
 .block-container { padding-top: 24px !important; max-width: 1200px; }
@@ -462,12 +509,12 @@ html, body, [data-testid="stAppViewContainer"]{
   .hero-row{ align-items:center; }
 }
 
-/* CARD (вся карточка одним контуром, включая паспорт) */
+/* CARD */
 .card{
   background:
     radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%),
     radial-gradient(700px 260px at 92% 18%, rgba(16,185,129,.08), rgba(0,0,0,0) 55%),
-    linear-gradient(180deg, #ffffff, #f5f8ff);
+    linear-gradient(180deg, #ffffff, #f4f8ff);
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 16px;
@@ -545,15 +592,25 @@ html, body, [data-testid="stAppViewContainer"]{
 .a-btn:hover{ transform: translateY(-1px); box-shadow: 0 10px 18px rgba(0,0,0,.10); }
 .a-btn.disabled{ opacity: .45; pointer-events:none; }
 
+/* SECTION */
 .section{
   margin-top: 12px;
   padding: 12px;
   border-radius: 14px;
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.96));
+  background: var(--soft);
 }
 .section-title{ font-weight: 900; color: var(--text); margin-bottom: 8px; font-size: 14px; }
-.row{ display:flex; gap: 10px; flex-wrap: wrap; color: var(--text); font-size: 13.5px; line-height: 1.35; }
+.row{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
 .row b{ color: var(--text); }
 .row .muted{ color: var(--muted); }
 
@@ -564,14 +621,17 @@ html, body, [data-testid="stAppViewContainer"]{
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 13.5px;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-/* ПАСПОРТ (HTML details) — внутри контура карточки */
+/* PASSPORT (details) */
 .passport{
   margin-top: 12px;
   border-radius: 14px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,.75);
+  background: var(--soft2);
   overflow: hidden;
 }
 .passport summary{
@@ -596,9 +656,46 @@ html, body, [data-testid="stAppViewContainer"]{
   border-top: 1px dashed var(--hr);
 }
 
+/* Секции паспорта в 2 колонки */
+.passport-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.section-wide{
+  grid-column: 1 / -1; /* на всю ширину */
+}
+
+/* Кнопка-свернуть внизу по центру */
+.passport-close{
+  display:flex;
+  justify-content:center;
+  margin-top: 10px;
+}
+.passport-close a{
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--btn-bd);
+  background: rgba(255,255,255,.92);
+  color: var(--text);
+  text-decoration: none !important;
+  font-weight: 900;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  line-height: 1;
+  transition: .12s ease-in-out;
+}
+.passport-close a:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(0,0,0,.10);
+}
+
 @media (max-width: 900px){
   .card-grid{ grid-template-columns: 1fr; }
   .card-title{ font-size: 18px; }
+  .passport-grid{ grid-template-columns: 1fr; }
 }
 </style>
 """,
@@ -635,7 +732,7 @@ st.markdown(
 
 
 # =============================
-# AUTH (PASSWORD GATE)
+# AUTH
 # =============================
 def get_app_password() -> str | None:
     try:
@@ -694,7 +791,7 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS (сразу после шапки)
+# FILTERS
 # =============================
 c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
@@ -741,7 +838,7 @@ st.divider()
 
 
 # =============================
-# CARD RENDER (вся карточка одним HTML, включая паспорт)
+# CARD RENDER (HTML)
 # =============================
 def tag_class(color: str) -> str:
     if color == "green":
@@ -757,8 +854,9 @@ def kv_html(label: str, value) -> str:
     return f'<div class="row"><b>{esc(label)}:</b> {esc(value)}</div>'
 
 
-def section_html(title: str, inner_html: str) -> str:
-    return f'<div class="section"><div class="section-title">{esc(title)}</div>{inner_html}</div>'
+def section_html(title: str, inner_html: str, wide: bool = False) -> str:
+    cls = "section section-wide" if wide else "section"
+    return f'<div class="{cls}"><div class="section-title">{esc(title)}</div>{inner_html}</div>'
 
 
 def render_card(row: pd.Series):
@@ -795,7 +893,9 @@ def render_card(row: pd.Series):
         issues_html = '<div class="row"><span class="muted">—</span></div>'
 
     passport_blocks = []
-    passport_blocks.append(section_html("⚠️ Проблемные вопросы", issues_html))
+
+    # Проблемы — на всю ширину
+    passport_blocks.append(section_html("⚠️ Проблемные вопросы", issues_html, wide=True))
 
     prog = (
         kv_html("ГП/СП", row.get("state_program", "—"))
@@ -843,10 +943,11 @@ def render_card(row: pd.Series):
     )
     passport_blocks.append(section_html("🧩 Контракт", contr))
 
+    # ВАЖНО: готовность форматируем как %
     terms = (
         kv_html("Окончание (план)", date_fmt(row.get("end_date_plan", "")))
         + kv_html("Окончание (факт)", date_fmt(row.get("end_date_fact", "")))
-        + kv_html("Готовность", row.get("readiness", "—"))
+        + kv_html("Готовность", readiness_fmt(row.get("readiness", "")))
         + kv_html("Оплачено", money_fmt(row.get("paid", "")))
     )
     passport_blocks.append(section_html("⏳ Сроки / финансы", terms))
@@ -855,7 +956,13 @@ def render_card(row: pd.Series):
         '<details class="passport">'
         '<summary>📋 Паспорт объекта и контрольные показатели</summary>'
         '<div class="passport-body">'
+        '<div class="passport-grid">'
         + "".join(passport_blocks)
+        + "</div>"
+        # стрелка-свернуть по центру
+        + '<div class="passport-close">'
+          '<a href="#" title="Свернуть" onclick="this.closest(\'details\').removeAttribute(\'open\'); return false;">▴</a>'
+          "</div>"
         + "</div></details>"
     )
 
