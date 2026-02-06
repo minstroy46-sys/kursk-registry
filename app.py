@@ -179,7 +179,6 @@ def change_level_badge(level_value) -> tuple[str, str]:
         return "yellow", "minor"
     if s in ("ignore", "игнор", "—", "", "none", "null"):
         return "gray", "—"
-    # если вдруг прилетело что-то своё — показываем как есть, но нейтрально
     return "blue", safe_text(level_value, fallback="—")
 
 
@@ -463,7 +462,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================
-# STYLES (с жёстким FIX Android/MIUI dark inputs)
+# STYLES
 # =============================
 crest_b64 = read_local_crest_b64()
 
@@ -516,9 +515,7 @@ label, [data-testid="stWidgetLabel"] *{
 }
 h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
 
-/* =========================
-   FIX: Android/MIUI dark inputs (BaseWeb)
-   ========================= */
+/* FIX: Android/MIUI dark inputs */
 div[data-baseweb="input"] > div,
 div[data-baseweb="select"] > div{
   background: rgba(255,255,255,.96) !important;
@@ -536,11 +533,6 @@ div[data-baseweb="select"] input{
   color: var(--text) !important;
   -webkit-text-fill-color: var(--text) !important;
 }
-div[data-baseweb="input"] [data-baseweb="button"],
-div[data-baseweb="input"] button{
-  background: rgba(255,255,255,0) !important;
-  color: var(--text) !important;
-}
 div[data-baseweb="select"] svg,
 div[data-baseweb="input"] svg{
   fill: var(--text) !important;
@@ -554,16 +546,13 @@ div[data-baseweb="menu"]{
   border-radius: 14px !important;
   box-shadow: 0 18px 32px rgba(0,0,0,.14) !important;
 }
-div[role="listbox"]{ background: #ffffff !important; }
-div[role="option"]{ background: #ffffff !important; color: var(--text) !important; }
-div[role="option"]:hover{ background: rgba(15,23,42,.06) !important; }
 select, input, textarea{
   background: rgba(255,255,255,.96) !important;
   color: var(--text) !important;
   -webkit-text-fill-color: var(--text) !important;
 }
 
-/* кнопки (в т.ч. submit в форме) */
+/* кнопки */
 div.stButton > button,
 div[data-testid="stFormSubmitButton"] > button{
   background: rgba(255,255,255,.96) !important;
@@ -680,7 +669,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   font-size: 13px; font-weight: 800;
 }
 
-/* фото (средний размер, не плывёт) */
+/* фото */
 .photo-wrap{
   width: 100%;
   border-radius: 14px;
@@ -715,22 +704,23 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .addr-row{ margin-top: 8px; font-size: 14px; }
 .addr-row b{ font-weight: 900; }
 
-/* теги + ответственный справа */
+/* теги + правый блок */
 .tags-row{
   display:flex;
-  align-items:center;
+  align-items:flex-end;
   justify-content: space-between;
   gap: 12px;
   margin-top: 12px;
   flex-wrap: wrap;
 }
-.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; }
+.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; align-items:flex-end; }
 .tag{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
   font-size: 13px; font-weight: 800;
+  white-space: nowrap;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
@@ -738,15 +728,38 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 .tag-blue{ background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.22); }
 
-/* компактный “чип обновления” (похож на остальные, но чуть выразительнее) */
+/* блок “контроль обновлений” справа */
+.right-stack{
+  display:flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+@media (max-width: 900px){
+  .right-stack{ align-items: flex-start; }
+}
+
+/* чипы обновления (компактные, аккуратные) */
 .tag-update{
   box-shadow: 0 10px 18px rgba(0,0,0,.06);
 }
 .tag-update small{
   font-weight: 900;
-  opacity: .82;
+  opacity: .88;
 }
 
+/* ПУЛЬСАЦИЯ/СВЕЧЕНИЕ ТОЛЬКО ДЛЯ major */
+@keyframes majorPulse {
+  0%   { box-shadow: 0 0 0 rgba(239,68,68,0.00), 0 10px 18px rgba(0,0,0,.06); }
+  50%  { box-shadow: 0 0 16px rgba(239,68,68,.28), 0 10px 18px rgba(0,0,0,.06); }
+  100% { box-shadow: 0 0 0 rgba(239,68,68,0.00), 0 10px 18px rgba(0,0,0,.06); }
+}
+.pulse-major{
+  animation: majorPulse 1.6s ease-in-out infinite;
+  border-color: rgba(239,68,68,.34) !important;
+}
+
+/* чип “ответственный” */
 .resp-chip{
   display:inline-flex;
   align-items:center;
@@ -1058,16 +1071,9 @@ def render_card(row: pd.Series):
     work_flag = safe_text(row.get("work_flag", ""), "—")
     issues = safe_text(row.get("issues", ""), "—")
 
-    # === Обновление (основной чип) — берём из Apps Script: card_updated_at ===
-    # если пусто — серый "—"
+    # Контроль обновлений (Apps Script)
     upd_col, upd_txt = update_color(row.get("card_updated_drive", ""))
-
-    # === Уровень изменения (major/minor) ===
     lvl_col, lvl_txt = change_level_badge(row.get("change_level", ""))
-
-    # (опционально) дата обновления вручную/из реестра — можно показывать в правом чипе (не перегружая слева)
-    reg_u_txt = date_fmt(row.get("updated_at", "")) if try_parse_date(row.get("updated_at", "")) else safe_text(row.get("updated_at", ""), "—")
-    show_registry_date_in_right = False  # если захотите — поставьте True
 
     accent = status_accent(status)
     w_col = works_color(work_flag)
@@ -1076,6 +1082,9 @@ def render_card(row: pd.Series):
     w_cls = tag_class(w_col)
     upd_cls = tag_class(upd_col)
     lvl_cls = tag_class(lvl_col)
+
+    # major -> добавляем пульсацию/свечение
+    major_pulse_cls = "pulse-major" if norm_col(lvl_txt) == "major" else ""
 
     card_url = ensure_url(row.get("card_url_text", ""))
     photo_src = drive_image_url(row.get("photo_url", ""))
@@ -1182,21 +1191,23 @@ def render_card(row: pd.Series):
 """
     )
 
-    # Ответственный справа (по желанию доп. инфо)
-    resp_right = f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>'
-    if show_registry_date_in_right and reg_u_txt and reg_u_txt != "—":
-        resp_right = (
-            f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}'
-            f' &nbsp; <span class="muted">|</span> &nbsp; <span class="muted">🧾 Реестр:</span> {esc(reg_u_txt)}</span>'
-        )
-    resp_html = html_clean(resp_right)
+    resp_html = html_clean(
+        f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>'
+    )
 
-    # Иконка для change_level
-    lvl_icon = "🔴" if lvl_txt == "major" else ("🟡" if lvl_txt == "minor" else "⚪")
+    lvl_icon = "🔴" if norm_col(lvl_txt) == "major" else ("🟡" if norm_col(lvl_txt) == "minor" else "⚪")
 
-    # Формируем чипы обновления в едином стиле
-    # 1) Обновлено по карточке (Apps Script: card_updated_at) — основной “светофор”
-    # 2) Уровень изменения (change_level) — рядом, чтобы сразу видно важность
+    # ВАЖНО: переносим 2 чипа “обновление/изменение” НАД “ответственным” (в правой колонке)
+    right_block = html_clean(
+        f"""
+<div class="right-stack">
+  <span class="tag tag-update {upd_cls}">⏱️ Обновлено: <small>{esc(upd_txt)}</small></span>
+  <span class="tag tag-update {lvl_cls} {major_pulse_cls}">{lvl_icon} Изменение: <small>{esc(lvl_txt)}</small></span>
+  {resp_html}
+</div>
+"""
+    )
+
     card_html = html_clean(
         f"""
 <div class="card" data-accent="{esc(accent)}">
@@ -1215,11 +1226,8 @@ def render_card(row: pd.Series):
     <div class="tags-left">
       <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
       <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
-
-      <span class="tag tag-update {upd_cls}">⏱️ Обновлено: <small>{esc(upd_txt)}</small></span>
-      <span class="tag tag-update {lvl_cls}">{lvl_icon} Изменение: <small>{esc(lvl_txt)}</small></span>
     </div>
-    {resp_html}
+    {right_block}
   </div>
 
   {btn_html}
