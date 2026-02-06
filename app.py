@@ -155,6 +155,7 @@ def try_parse_date(v) -> date | None:
 
 
 def update_color(updated_at_value) -> tuple[str, str]:
+    """Светофор по давности (для дат): <=7 зелёный, <=14 жёлтый, иначе красный."""
     d = try_parse_date(updated_at_value)
     if not d:
         return "gray", "—"
@@ -164,6 +165,22 @@ def update_color(updated_at_value) -> tuple[str, str]:
     if days <= 14:
         return "yellow", d.strftime("%d.%m.%Y")
     return "red", d.strftime("%d.%m.%Y")
+
+
+def change_level_badge(level_value) -> tuple[str, str]:
+    """
+    Цвет + текст для change_level.
+    major -> красный, minor -> жёлтый, ignore/none -> серый.
+    """
+    s = norm_col(safe_text(level_value, fallback="—"))
+    if s in ("major", "мажор", "значимое", "существенное"):
+        return "red", "major"
+    if s in ("minor", "минор", "незначимое", "незначительное"):
+        return "yellow", "minor"
+    if s in ("ignore", "игнор", "—", "", "none", "null"):
+        return "gray", "—"
+    # если вдруг прилетело что-то своё — показываем как есть, но нейтрально
+    return "blue", safe_text(level_value, fallback="—")
 
 
 def money_fmt(v) -> str:
@@ -380,7 +397,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
 
-    # --- Пригодится для контроля изменений (см. раздел 2) ---
+    # --- Контроль обновлений из Apps Script ---
     out["card_updated_drive"] = df[col("card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки")] if col(
         "card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки"
     ) else ""
@@ -719,6 +736,16 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
 .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
+.tag-blue{ background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.22); }
+
+/* компактный “чип обновления” (похож на остальные, но чуть выразительнее) */
+.tag-update{
+  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+}
+.tag-update small{
+  font-weight: 900;
+  opacity: .82;
+}
 
 .resp-chip{
   display:inline-flex;
@@ -1004,6 +1031,8 @@ def tag_class(color: str) -> str:
         return "tag-yellow"
     if color == "red":
         return "tag-red"
+    if color == "blue":
+        return "tag-blue"
     return "tag-gray"
 
 
@@ -1029,20 +1058,24 @@ def render_card(row: pd.Series):
     work_flag = safe_text(row.get("work_flag", ""), "—")
     issues = safe_text(row.get("issues", ""), "—")
 
-    # дата обновления из реестра (как у вас)
-    u_col, u_txt = update_color(row.get("updated_at", ""))
+    # === Обновление (основной чип) — берём из Apps Script: card_updated_at ===
+    # если пусто — серый "—"
+    upd_col, upd_txt = update_color(row.get("card_updated_drive", ""))
 
-    # доп. дата обновления карточки на диске (если добавите в реестр, см. раздел 2)
-    card_upd_txt = safe_text(row.get("card_updated_drive", ""), "")
-    if card_upd_txt:
-        card_upd_txt = date_fmt(card_upd_txt) if try_parse_date(card_upd_txt) else safe_text(card_upd_txt, "—")
+    # === Уровень изменения (major/minor) ===
+    lvl_col, lvl_txt = change_level_badge(row.get("change_level", ""))
+
+    # (опционально) дата обновления вручную/из реестра — можно показывать в правом чипе (не перегружая слева)
+    reg_u_txt = date_fmt(row.get("updated_at", "")) if try_parse_date(row.get("updated_at", "")) else safe_text(row.get("updated_at", ""), "—")
+    show_registry_date_in_right = False  # если захотите — поставьте True
 
     accent = status_accent(status)
     w_col = works_color(work_flag)
 
     s_cls = tag_class(accent)
     w_cls = tag_class(w_col)
-    u_cls = tag_class(u_col)
+    upd_cls = tag_class(upd_col)
+    lvl_cls = tag_class(lvl_col)
 
     card_url = ensure_url(row.get("card_url_text", ""))
     photo_src = drive_image_url(row.get("photo_url", ""))
@@ -1149,15 +1182,21 @@ def render_card(row: pd.Series):
 """
     )
 
-    # Ответственный справа + (по желанию) дата обновления карточки на диске
+    # Ответственный справа (по желанию доп. инфо)
     resp_right = f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>'
-    if card_upd_txt:
+    if show_registry_date_in_right and reg_u_txt and reg_u_txt != "—":
         resp_right = (
             f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}'
-            f' &nbsp; <span class="muted">|</span> &nbsp; <span class="muted">📁 Карточка:</span> {esc(card_upd_txt)}</span>'
+            f' &nbsp; <span class="muted">|</span> &nbsp; <span class="muted">🧾 Реестр:</span> {esc(reg_u_txt)}</span>'
         )
     resp_html = html_clean(resp_right)
 
+    # Иконка для change_level
+    lvl_icon = "🔴" if lvl_txt == "major" else ("🟡" if lvl_txt == "minor" else "⚪")
+
+    # Формируем чипы обновления в едином стиле
+    # 1) Обновлено по карточке (Apps Script: card_updated_at) — основной “светофор”
+    # 2) Уровень изменения (change_level) — рядом, чтобы сразу видно важность
     card_html = html_clean(
         f"""
 <div class="card" data-accent="{esc(accent)}">
@@ -1176,7 +1215,9 @@ def render_card(row: pd.Series):
     <div class="tags-left">
       <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
       <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
-      <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
+
+      <span class="tag tag-update {upd_cls}">⏱️ Обновлено: <small>{esc(upd_txt)}</small></span>
+      <span class="tag tag-update {lvl_cls}">{lvl_icon} Изменение: <small>{esc(lvl_txt)}</small></span>
     </div>
     {resp_html}
   </div>
