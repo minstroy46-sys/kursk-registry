@@ -175,12 +175,20 @@ def change_level_badge(v) -> tuple[str, str, str]:
     """
     s_raw = safe_text(v, fallback="—")
     s = norm_col(s_raw)
-    if s in ("major", "мажор", "существенное", "значимое"):
-        return "red", "major", "pulse-major"
-    if s in ("minor", "минор", "незначительное", "незначимое"):
-        return "yellow", "minor", ""
-    if s in ("ignore", "игнор", "", "—", "none", "null"):
-        return "gray", "—", ""
+
+    # major
+    if s in ("major", "мажор", "существенное", "значимое", "критичное", "критическое", "важное"):
+        return "red", "Существенное", "pulse-major"
+
+    # minor
+    if s in ("minor", "минор", "незначительное", "незначимое", "малое", "малозначимое"):
+        return "yellow", "Незначительное", ""
+
+    # ignore
+    if s in ("ignore", "игнор", "без учета", "без учёта", "нет", "—", "", "none", "null"):
+        return "gray", "Без учета", ""
+
+    # если вдруг пришло что-то иное — покажем как есть
     return "blue", s_raw, ""
 
 
