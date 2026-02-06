@@ -166,15 +166,22 @@ def update_color(updated_at_value) -> tuple[str, str]:
     return "red", d.strftime("%d.%m.%Y")
 
 
-def change_level_badge(level_value) -> tuple[str, str]:
-    s = norm_col(safe_text(level_value, fallback="—"))
-    if s in ("major", "мажор", "значимое", "существенное"):
-        return "red", "major"
-    if s in ("minor", "минор", "незначимое", "незначительное"):
-        return "yellow", "minor"
-    if s in ("ignore", "игнор", "—", "", "none", "null"):
-        return "gray", "—"
-    return "blue", safe_text(level_value, fallback="—")
+def change_level_badge(v) -> tuple[str, str, str]:
+    """
+    Возвращает:
+      - color (для tag_class)
+      - label text (что писать в чип)
+      - pulse_class (доп. класс для пульсации, только для major)
+    """
+    s_raw = safe_text(v, fallback="—")
+    s = norm_col(s_raw)
+    if s in ("major", "мажор", "существенное", "значимое"):
+        return "red", "major", "pulse-major"
+    if s in ("minor", "минор", "незначительное", "незначимое"):
+        return "yellow", "minor", ""
+    if s in ("ignore", "игнор", "", "—", "none", "null"):
+        return "gray", "—", ""
+    return "blue", s_raw, ""
 
 
 def money_fmt(v) -> str:
@@ -376,6 +383,9 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["issues"] = df[col("issues", "проблемы", "проблемные вопросы")] if col(
         "issues", "проблемы", "проблемные вопросы"
     ) else ""
+    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
+        "updated_at", "last_update", "обновлено", "updated"
+    ) else ""
 
     out["card_url_text"] = df[
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
@@ -385,7 +395,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
 
-    # --- Контроль обновлений (Apps Script пишет в реестр) ---
+    # Apps Script пишет сюда:
     out["card_updated_drive"] = df[col("card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки")] if col(
         "card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки"
     ) else ""
@@ -491,7 +501,6 @@ header {visibility: hidden;}
 html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
 }
-
 html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
   color: var(--text);
 }
@@ -502,7 +511,7 @@ label, [data-testid="stWidgetLabel"] *{
 }
 h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
 
-/* FIX: Android/MIUI dark inputs */
+/* FIX: Android/MIUI dark inputs (BaseWeb) */
 div[data-baseweb="input"] > div,
 div[data-baseweb="select"] > div{
   background: rgba(255,255,255,.96) !important;
@@ -524,29 +533,6 @@ div[data-baseweb="select"] svg,
 div[data-baseweb="input"] svg{
   fill: var(--text) !important;
   color: var(--text) !important;
-}
-div[data-baseweb="popover"],
-div[data-baseweb="menu"]{
-  background: #ffffff !important;
-  color: var(--text) !important;
-  border: 1px solid rgba(15,23,42,.14) !important;
-  border-radius: 14px !important;
-  box-shadow: 0 18px 32px rgba(0,0,0,.14) !important;
-}
-select, input, textarea{
-  background: rgba(255,255,255,.96) !important;
-  color: var(--text) !important;
-  -webkit-text-fill-color: var(--text) !important;
-}
-
-div.stButton > button,
-div[data-testid="stFormSubmitButton"] > button{
-  background: rgba(255,255,255,.96) !important;
-  color: var(--text) !important;
-  border: 1px solid rgba(15,23,42,.18) !important;
-  border-radius: 12px !important;
-  box-shadow: 0 10px 18px rgba(0,0,0,.08) !important;
-  opacity: 1 !important;
 }
 
 /* HERO */
@@ -645,7 +631,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
               inset 12px 0 0 rgba(59,130,246,.52),
               0 0 18px rgba(59,130,246,.10);
 }
-
 .card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; }
 .card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 12px; }
 .chip{
@@ -691,71 +676,40 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .addr-row{ margin-top: 8px; font-size: 14px; }
 .addr-row b{ font-weight: 900; }
 
-/* теги + правый блок */
+/* теги + ответственный справа */
 .tags-row{
   display:flex;
-  align-items:flex-end;
+  align-items:flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-top: 12px;
   flex-wrap: wrap;
 }
-.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; align-items:flex-end; }
+.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; align-items:center; }
+
 .tag{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
   font-size: 13px; font-weight: 800;
-  white-space: nowrap;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
 .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
-.tag-blue{ background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.22); }
 
-/* правый блок: 2 чипа В ОДНУ СТРОКУ + ниже ответственный */
-.right-stack{
+.resp-wrap{
   display:flex;
   flex-direction: column;
-  gap: 8px;
   align-items: flex-end;
+  gap: 8px;
+  min-width: 240px;
 }
 @media (max-width: 900px){
-  .right-stack{ align-items: flex-start; }
-}
-.right-chips{
-  display:flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-@media (max-width: 900px){
-  .right-chips{ justify-content: flex-start; }
+  .resp-wrap{ align-items:flex-start; min-width: auto; width: 100%; }
 }
 
-/* чипы обновления */
-.tag-update{
-  box-shadow: 0 10px 18px rgba(0,0,0,.06);
-}
-.tag-update small{
-  font-weight: 900;
-  opacity: .88;
-}
-
-/* ПУЛЬСАЦИЯ/СВЕЧЕНИЕ ТОЛЬКО ДЛЯ major */
-@keyframes majorPulse {
-  0%   { box-shadow: 0 0 0 rgba(239,68,68,0.00), 0 10px 18px rgba(0,0,0,.06); }
-  50%  { box-shadow: 0 0 16px rgba(239,68,68,.28), 0 10px 18px rgba(0,0,0,.06); }
-  100% { box-shadow: 0 0 0 rgba(239,68,68,0.00), 0 10px 18px rgba(0,0,0,.06); }
-}
-.pulse-major{
-  animation: majorPulse 1.6s ease-in-out infinite;
-  border-color: rgba(239,68,68,.34) !important;
-}
-
-/* чип “ответственный” */
 .resp-chip{
   display:inline-flex;
   align-items:center;
@@ -772,6 +726,27 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .resp-chip .muted{ font-weight: 800; color: rgba(15,23,42,.70) !important; }
 @media (max-width: 900px){
   .resp-chip{ white-space: normal; }
+}
+
+/* строка чипов обновления под ответственным */
+.right-meta{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 900px){
+  .right-meta{ justify-content:flex-start; }
+}
+
+/* пульсация только у major */
+@keyframes majorPulse {
+  0%   { box-shadow: 0 0 0 rgba(239,68,68,0.0); }
+  50%  { box-shadow: 0 0 0 3px rgba(239,68,68,0.18); }
+  100% { box-shadow: 0 0 0 rgba(239,68,68,0.0); }
+}
+.pulse-major{
+  animation: majorPulse 1.6s ease-in-out infinite;
 }
 
 /* кнопка */
@@ -801,11 +776,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   overflow: hidden;
   box-shadow: 0 10px 18px rgba(0,0,0,.06);
 }
-.passport-toggle{
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
+.passport-toggle{ position: absolute; opacity: 0; pointer-events: none; }
 .passport-summary{
   cursor: pointer;
   padding: 12px 12px;
@@ -817,7 +788,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 }
 .passport-summary:before{ content: "▸"; font-weight: 900; opacity: .7; }
 .passport-toggle:checked + .passport-summary:before{ content: "▾"; }
-
 .passport-body{
   display: none;
   padding: 12px 12px 14px 12px;
@@ -1040,8 +1010,6 @@ def tag_class(color: str) -> str:
         return "tag-yellow"
     if color == "red":
         return "tag-red"
-    if color == "blue":
-        return "tag-blue"
     return "tag-gray"
 
 
@@ -1067,19 +1035,20 @@ def render_card(row: pd.Series):
     work_flag = safe_text(row.get("work_flag", ""), "—")
     issues = safe_text(row.get("issues", ""), "—")
 
-    # Контроль обновлений (Apps Script)
-    upd_col, upd_txt = update_color(row.get("card_updated_drive", ""))
-    lvl_col, lvl_txt = change_level_badge(row.get("change_level", ""))
+    # Обновлено (по полю card_updated_at из реестра)
+    upd_color, upd_txt = update_color(row.get("card_updated_drive", ""))
+
+    # Изменение (major/minor/—)
+    ch_color, ch_label, ch_pulse = change_level_badge(row.get("change_level", ""))
 
     accent = status_accent(status)
     w_col = works_color(work_flag)
 
     s_cls = tag_class(accent)
     w_cls = tag_class(w_col)
-    upd_cls = tag_class(upd_col)
-    lvl_cls = tag_class(lvl_col)
 
-    major_pulse_cls = "pulse-major" if norm_col(lvl_txt) == "major" else ""
+    upd_cls = tag_class(upd_color)
+    ch_cls = tag_class(ch_color)
 
     card_url = ensure_url(row.get("card_url_text", ""))
     photo_src = drive_image_url(row.get("photo_url", ""))
@@ -1186,21 +1155,15 @@ def render_card(row: pd.Series):
 """
     )
 
-    resp_html = html_clean(
-        f'<span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>'
-    )
-
-    lvl_icon = "🔴" if norm_col(lvl_txt) == "major" else ("🟡" if norm_col(lvl_txt) == "minor" else "⚪")
-
-    # ✅ ИСПРАВЛЕНИЕ: два чипа "Обновлено/Изменение" В ОДНУ СТРОКУ, а ниже — "Ответственный"
-    right_block = html_clean(
+    # Правая колонка: ответственный + (под ним) 2 чипа в одну строку
+    right_html = html_clean(
         f"""
-<div class="right-stack">
-  <div class="right-chips">
-    <span class="tag tag-update {upd_cls}">⏱️ Обновлено: <small>{esc(upd_txt)}</small></span>
-    <span class="tag tag-update {lvl_cls} {major_pulse_cls}">{lvl_icon} Изменение: <small>{esc(lvl_txt)}</small></span>
+<div class="resp-wrap">
+  <span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>
+  <div class="right-meta">
+    <span class="tag {upd_cls}">⏱️ Обновлено: {esc(upd_txt)}</span>
+    <span class="tag {ch_cls} {esc(ch_pulse)}">⚡ Изменение: {esc(ch_label)}</span>
   </div>
-  {resp_html}
 </div>
 """
     )
@@ -1224,7 +1187,7 @@ def render_card(row: pd.Series):
       <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
       <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
     </div>
-    {right_block}
+    {right_html}
   </div>
 
   {btn_html}
@@ -1241,4 +1204,3 @@ def render_card(row: pd.Series):
 # =============================
 for _, r in filtered.iterrows():
     render_card(r)
-```
