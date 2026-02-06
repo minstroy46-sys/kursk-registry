@@ -170,17 +170,25 @@ def change_level_badge(v) -> tuple[str, str, str]:
     """
     Возвращает:
       - color (для tag_class)
-      - label text (что писать в чип)
+      - label text (текст в чипе)
       - pulse_class (доп. класс для пульсации, только для major)
     """
     s_raw = safe_text(v, fallback="—")
     s = norm_col(s_raw)
-    if s in ("major", "мажор", "существенное", "значимое"):
-        return "red", "major", "pulse-major"
-    if s in ("minor", "минор", "незначительное", "незначимое"):
-        return "yellow", "minor", ""
-    if s in ("ignore", "игнор", "", "—", "none", "null"):
+
+    # major
+    if s in ("major", "мажор", "важно", "критично", "критическое", "существенное", "значимое", "важное"):
+        return "red", "Важно", "pulse-major"
+
+    # minor
+    if s in ("minor", "минор", "мелкое", "незначительное", "малое", "малозначимое"):
+        return "yellow", "Мелкое", ""
+
+    # ignore / пусто
+    if s in ("ignore", "игнор", "—", "", "none", "null", "без учета", "без учёта", "нет"):
         return "gray", "—", ""
+
+    # если пришло что-то неожиданное — покажем как есть (и не сломаемся)
     return "blue", s_raw, ""
 
 
