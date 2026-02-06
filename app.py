@@ -1,3 +1,4 @@
+```python
 import base64
 import html
 import re
@@ -155,7 +156,6 @@ def try_parse_date(v) -> date | None:
 
 
 def update_color(updated_at_value) -> tuple[str, str]:
-    """Светофор по давности (для дат): <=7 зелёный, <=14 жёлтый, иначе красный."""
     d = try_parse_date(updated_at_value)
     if not d:
         return "gray", "—"
@@ -168,10 +168,6 @@ def update_color(updated_at_value) -> tuple[str, str]:
 
 
 def change_level_badge(level_value) -> tuple[str, str]:
-    """
-    Цвет + текст для change_level.
-    major -> красный, minor -> жёлтый, ignore/none -> серый.
-    """
     s = norm_col(safe_text(level_value, fallback="—"))
     if s in ("major", "мажор", "значимое", "существенное"):
         return "red", "major"
@@ -229,14 +225,12 @@ def norm_search(s: str) -> str:
 
 
 def html_clean(s: str) -> str:
-    """Убираем отступы, чтобы Streamlit не превращал HTML в code-block."""
     if s is None:
         return ""
     lines = str(s).splitlines()
     return "\n".join([ln.lstrip() for ln in lines]).strip()
 
 
-# Фото: Google Drive link -> прямая картинка
 def extract_drive_file_id(url: str) -> str:
     u = safe_text(url, fallback="").strip()
     if not u:
@@ -383,20 +377,16 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["issues"] = df[col("issues", "проблемы", "проблемные вопросы")] if col(
         "issues", "проблемы", "проблемные вопросы"
     ) else ""
-    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
-        "updated_at", "last_update", "обновлено", "updated"
-    ) else ""
 
     out["card_url_text"] = df[
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
 
-    # Фото (из реестра)
     out["photo_url"] = df[col("photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото")] if col(
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
 
-    # --- Контроль обновлений из Apps Script ---
+    # --- Контроль обновлений (Apps Script пишет в реестр) ---
     out["card_updated_drive"] = df[col("card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки")] if col(
         "card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки"
     ) else ""
@@ -503,11 +493,9 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
 }
 
-/* фикс цвета текста на мобиле */
 html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
   color: var(--text);
 }
-p, span, li, div, small { color: var(--text); }
 .stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
 label, [data-testid="stWidgetLabel"] *{
   color: var(--text) !important;
@@ -552,7 +540,6 @@ select, input, textarea{
   -webkit-text-fill-color: var(--text) !important;
 }
 
-/* кнопки */
 div.stButton > button,
 div[data-testid="stFormSubmitButton"] > button{
   background: rgba(255,255,255,.96) !important;
@@ -659,6 +646,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
               inset 12px 0 0 rgba(59,130,246,.52),
               0 0 18px rgba(59,130,246,.10);
 }
+
 .card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; }
 .card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 12px; }
 .chip{
@@ -728,7 +716,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 .tag-blue{ background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.22); }
 
-/* блок “контроль обновлений” справа */
+/* правый блок: 2 чипа В ОДНУ СТРОКУ + ниже ответственный */
 .right-stack{
   display:flex;
   flex-direction: column;
@@ -738,8 +726,17 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 @media (max-width: 900px){
   .right-stack{ align-items: flex-start; }
 }
+.right-chips{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 900px){
+  .right-chips{ justify-content: flex-start; }
+}
 
-/* чипы обновления (компактные, аккуратные) */
+/* чипы обновления */
 .tag-update{
   box-shadow: 0 10px 18px rgba(0,0,0,.06);
 }
@@ -1083,7 +1080,6 @@ def render_card(row: pd.Series):
     upd_cls = tag_class(upd_col)
     lvl_cls = tag_class(lvl_col)
 
-    # major -> добавляем пульсацию/свечение
     major_pulse_cls = "pulse-major" if norm_col(lvl_txt) == "major" else ""
 
     card_url = ensure_url(row.get("card_url_text", ""))
@@ -1197,12 +1193,14 @@ def render_card(row: pd.Series):
 
     lvl_icon = "🔴" if norm_col(lvl_txt) == "major" else ("🟡" if norm_col(lvl_txt) == "minor" else "⚪")
 
-    # ВАЖНО: переносим 2 чипа “обновление/изменение” НАД “ответственным” (в правой колонке)
+    # ✅ ИСПРАВЛЕНИЕ: два чипа "Обновлено/Изменение" В ОДНУ СТРОКУ, а ниже — "Ответственный"
     right_block = html_clean(
         f"""
 <div class="right-stack">
-  <span class="tag tag-update {upd_cls}">⏱️ Обновлено: <small>{esc(upd_txt)}</small></span>
-  <span class="tag tag-update {lvl_cls} {major_pulse_cls}">{lvl_icon} Изменение: <small>{esc(lvl_txt)}</small></span>
+  <div class="right-chips">
+    <span class="tag tag-update {upd_cls}">⏱️ Обновлено: <small>{esc(upd_txt)}</small></span>
+    <span class="tag tag-update {lvl_cls} {major_pulse_cls}">{lvl_icon} Изменение: <small>{esc(lvl_txt)}</small></span>
+  </div>
   {resp_html}
 </div>
 """
@@ -1244,3 +1242,4 @@ def render_card(row: pd.Series):
 # =============================
 for _, r in filtered.iterrows():
     render_card(r)
+```
