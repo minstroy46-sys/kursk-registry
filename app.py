@@ -128,7 +128,6 @@ def try_parse_date(v) -> date | None:
     if not s or s.lower() in ("nan", "none", "null", "—"):
         return None
 
-    # serial date (Google/Excel)
     if re.fullmatch(r"\d+(\.\d+)?", s):
         try:
             num = float(s)
@@ -152,11 +151,6 @@ def try_parse_date(v) -> date | None:
         return dt.date()
     except Exception:
         return None
-
-
-def fmt_date_compact(v) -> str:
-    d = try_parse_date(v)
-    return d.strftime("%d.%m.%Y") if d else "—"
 
 
 def chip_date_color(v) -> tuple[str, str]:
@@ -371,11 +365,6 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "issues", "проблемы", "проблемные вопросы"
     ) else ""
 
-    # это старое "обновлено" (можно оставить для данных/поиска, но МЫ ЕГО НЕ ПОКАЗЫВАЕМ ЧИПОМ)
-    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
-        "updated_at", "last_update", "обновлено", "updated"
-    ) else ""
-
     out["card_url_text"] = df[
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
@@ -384,7 +373,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
 
-    # === НОВОЕ: контроль изменений из реестра ===
+    # === Контроль изменений (из реестра) ===
     out["card_updated_at"] = df[col("card_updated_at", "card_updated_drive", "card_updated")] if col(
         "card_updated_at", "card_updated_drive", "card_updated"
     ) else ""
@@ -398,7 +387,7 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         "change_note", "комментарий", "примечание", "note"
     ) else ""
 
-    # Паспортные поля (как у вас)
+    # Паспортные поля
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
         "state_program", "гп", "государственная программа"
     ) else ""
@@ -473,13 +462,10 @@ st.markdown(
   --border: rgba(15,23,42,.14);
   --border-strong: rgba(15,23,42,.20);
   --shadow: rgba(0,0,0,.07);
-
   --chip-bg: rgba(15,23,42,.05);
   --chip-bd: rgba(15,23,42,.10);
-
   --soft: linear-gradient(180deg, rgba(255,255,255,.98), rgba(245,248,255,.98));
   --soft2: linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,255,.98));
-
   --btn-bg: rgba(255,255,255,.96);
   --btn-bd: rgba(15,23,42,.18);
   --btn-shadow: rgba(0,0,0,.08);
@@ -493,22 +479,12 @@ div[data-testid="stHorizontalBlock"]{ gap: 14px; }
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-html, body, [data-testid="stAppViewContainer"]{
-  background: var(--page) !important;
-}
-
-html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
-  color: var(--text);
-}
-p, span, li, div, small { color: var(--text); }
+html, body, [data-testid="stAppViewContainer"]{ background: var(--page) !important; }
+html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{ color: var(--text); }
 .stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
-label, [data-testid="stWidgetLabel"] *{
-  color: var(--text) !important;
-  opacity: 1 !important;
-}
-h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
+label, [data-testid="stWidgetLabel"] *{ color: var(--text) !important; opacity: 1 !important; }
 
-/* FIX: Android/MIUI dark inputs (BaseWeb) */
+/* FIX: Android/MIUI dark inputs */
 div[data-baseweb="input"] > div,
 div[data-baseweb="select"] > div{
   background: rgba(255,255,255,.96) !important;
@@ -533,11 +509,6 @@ div[data-baseweb="menu"]{
   border: 1px solid rgba(15,23,42,.14) !important;
   border-radius: 14px !important;
   box-shadow: 0 18px 32px rgba(0,0,0,.14) !important;
-}
-select, input, textarea{
-  background: rgba(255,255,255,.96) !important;
-  color: var(--text) !important;
-  -webkit-text-fill-color: var(--text) !important;
 }
 
 /* HERO */
@@ -605,210 +576,27 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
     radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.08), rgba(0,0,0,0) 55%),
     radial-gradient(700px 260px at 92% 18%, rgba(16,185,129,.06), rgba(0,0,0,0) 55%),
     linear-gradient(180deg, #ffffff, #f4f8ff);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(15,23,42,.14);
   border-radius: 16px;
   padding: 22px;
-  box-shadow: 0 10px 22px var(--shadow);
+  box-shadow: 0 10px 22px rgba(0,0,0,.07);
   margin-bottom: 14px;
   position: relative;
 }
 .card[data-accent="green"]{
   border-color: rgba(34,197,94,.35);
-  box-shadow: 0 10px 22px var(--shadow),
+  box-shadow: 0 10px 22px rgba(0,0,0,.07),
               inset 12px 0 0 rgba(34,197,94,.55),
               0 0 18px rgba(34,197,94,.12);
 }
 .card[data-accent="yellow"]{
   border-color: rgba(245,158,11,.38);
-  box-shadow: 0 10px 22px var(--shadow),
+  box-shadow: 0 10px 22px rgba(0,0,0,.07),
               inset 12px 0 0 rgba(245,158,11,.58),
               0 0 18px rgba(245,158,11,.12);
 }
 .card[data-accent="red"]{
-  border-color: rgba(239,68,68,.38);
-  box-shadow: 0 10px 22px var(--shadow),
-              inset 12px 0 0 rgba(239,68,68,.58),
-              0 0 18px rgba(239,68,68,.12);
-}
-.card[data-accent="blue"]{
-  border-color: rgba(59,130,246,.32);
-  box-shadow: 0 10px 22px var(--shadow),
-              inset 12px 0 0 rgba(59,130,246,.52),
-              0 0 18px rgba(59,130,246,.10);
-}
-.card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; }
-.card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 12px; }
-.chip{
-  display:inline-flex; align-items:center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
-  border: 1px solid var(--chip-bd);
-  background: var(--chip-bg);
-  font-size: 13px; font-weight: 800;
-}
-
-/* фото */
-.photo-wrap{
-  width: 100%;
-  border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.12);
-  background: rgba(255,255,255,.88);
-  overflow: hidden;
-  box-shadow: 0 12px 22px rgba(0,0,0,.08);
-  margin: 10px 0 14px 0;
-  position: relative;
-}
-.photo-wrap:after{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 48%),
-              radial-gradient(900px 260px at 14% 12%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%);
-}
-.photo{
-  display:block;
-  width:100%;
-  height:auto;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  max-height: 280px;
-}
-@media (max-width: 900px){
-  .photo{ aspect-ratio: 4 / 3; max-height: 220px; }
-}
-
-/* адрес */
-.addr-row{ margin-top: 8px; font-size: 14px; }
-.addr-row b{ font-weight: 900; }
-
-/* теги + ответственный справа */
-.tags-row{
-  display:flex;
-  align-items:flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; }
-.tag{
-  display:inline-flex; align-items:center; gap: 8px;
-  padding: 6px 10px; border-radius: 999px;
-  border: 1px solid rgba(15,23,42,.10);
-  background: rgba(15,23,42,.05);
-  font-size: 13px; font-weight: 800;
-  user-select: none;
-}
-.tag-gray{ opacity: .92; }
-.tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
-.tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
-.tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
-
-.resp-stack{ display:flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.resp-chip{
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(15,23,42,.12);
-  background: rgba(255,255,255,.86);
-  font-size: 13px;
-  font-weight: 900;
-  box-shadow: 0 10px 18px rgba(0,0,0,.06);
-  white-space: nowrap;
-}
-.resp-chip .muted{ font-weight: 800; color: rgba(15,23,42,.70) !important; }
-@media (max-width: 900px){
-  .resp-chip{ white-space: normal; }
-  .resp-stack{ align-items: flex-start; }
-}
-
-/* ряд под ответственным */
-.meta-row{ display:flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-@media (max-width: 900px){
-  .meta-row{ justify-content: flex-start; }
-}
-
-/* кликабельный чип "изменение" (без ссылок!) */
-.meta-toggle{ position:absolute; opacity:0; pointer-events:none; }
-.tag-click{ cursor: pointer; }
-.tag-click:active{ transform: translateY(0.5px); }
-
-/* блок деталей изменений */
-.change-box{
-  margin-top: 8px;
-  border: 1px dashed rgba(15,23,42,.18);
-  background: rgba(255,255,255,.78);
-  border-radius: 12px;
-  padding: 10px 12px;
-  width: min(520px, 92vw);
-  box-shadow: 0 10px 18px rgba(0,0,0,.06);
-}
-.change-line{ font-size: 13.5px; line-height: 1.35; word-break: break-word; overflow-wrap:anywhere; }
-.change-line b{ font-weight: 900; }
-.change-muted{ color: rgba(15,23,42,.70) !important; }
-
-/* показываем change-box только если toggle включён */
-.meta-toggle:not(:checked) ~ .change-box{ display:none; }
-.meta-toggle:checked ~ .change-box{ display:block; }
-
-/* пульсация для ВАЖНО */
-@keyframes pulseGlow {
-  0%   { box-shadow: 0 0 0 rgba(239,68,68,.0), 0 10px 18px rgba(0,0,0,.06); }
-  50%  { box-shadow: 0 0 10px rgba(239,68,68,.30), 0 10px 18px rgba(0,0,0,.06); }
-  100% { box-shadow: 0 0 0 rgba(239,68,68,.0), 0 10px 18px rgba(0,0,0,.06); }
-}
-.tag-change-major{
-  border-color: rgba(239,68,68,.30) !important;
-  animation: pulseGlow 1.8s ease-in-out infinite;
-}
-
-/* кнопка */
-.a-btn{
-  width: 100%;
-  display:flex; justify-content:center; align-items:center; gap: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(15,23,42,.18);
-  background: rgba(255,255,255,.96);
-  text-decoration:none !important;
-  font-weight: 900;
-  font-size: 14px;
-  transition: .12s ease-in-out;
-  margin-top: 14px;
-  box-shadow: 0 10px 18px rgba(0,0,0,.08);
-}
-.a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
-.a-btn.disabled{ opacity: .45; pointer-events:none; }
-
-/* паспорт */
-.passport{
-  margin-top: 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(15,23,42,.20);
-  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,255,.98));
-  overflow: hidden;
-  box-shadow: 0 10px 18px rgba(0,0,0,.06);
-}
-.passport-toggle{ position: absolute; opacity: 0; pointer-events: none; }
-.passport-summary{
-  cursor: pointer;
-  padding: 12px 12px;
-  font-weight: 900;
-  display:flex;
-  align-items:center;
-  gap: 10px;
-  user-select: none;
-}
-.passport-summary:before{ content: "▸"; font-weight: 900; opacity: .7; }
-.passport-toggle:checked + .passport-summary:before{ content: "▾"; }
-.passport-body{
-  display: none;
-  padding: 12px 12px 14px 12px;
-  border-top: 1px dashed rgba(15,23,42,.12);
-}
-.passport-toggle:checked ~ .passport-body{ display: block; }
+ _toggle:checked ~ .passport-body{ display: block; }
 
 .passport-grid{
   display: grid;
@@ -821,7 +609,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   padding: 12px;
   border-radius: 14px;
   border: 1px solid rgba(15,23,42,.12);
-  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(245,248,255,.98));
+  background: var(--soft);
 }
 .section-title{ font-weight: 900; margin-bottom: 8px; font-size: 14px; }
 
@@ -835,7 +623,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   overflow-wrap: anywhere;
 }
 .row b{ font-weight: 900; }
-.row .muted{ color: rgba(15,23,42,.70) !important; }
+.row .muted{ color: var(--muted) !important; }
 
 .issue-box{
   border: 1px solid rgba(239,68,68,.22);
@@ -971,11 +759,14 @@ sectors = ["Все"] + sectors
 districts = ["Все"] + districts
 statuses = ["Все"] + statuses
 
+# фильтр по изменениям (всегда показываем)
+change_filters = ["Все", "Важно", "Правка", "—"]
+
 
 # =============================
 # FILTERS + SEARCH
 # =============================
-c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
+c1, c2, c3, c4, c5 = st.columns([1.0, 1.0, 1.0, 1.0, 1.35])
 with c1:
     sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
 with c2:
@@ -983,6 +774,8 @@ with c2:
 with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 with c4:
+    change_sel = st.selectbox("⚡ Изменения", change_filters, index=0, key="f_change")
+with c5:
     q = st.text_input("🔎 Поиск", value="", key="f_search", placeholder="").strip()
 
 
@@ -997,6 +790,16 @@ if district_sel != "Все":
     filtered = filtered[filtered["district"].astype(str) == str(district_sel)]
 if status_sel != "Все":
     filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
+
+# фильтр по изменениям (берём из change_level: major/minor/ignore/empty)
+if change_sel != "Все":
+    lv = filtered["change_level"].astype(str).apply(norm_col)
+    if change_sel == "Важно":
+        filtered = filtered[lv == "major"]
+    elif change_sel == "Правка":
+        filtered = filtered[lv == "minor"]
+    else:  # "—"
+        filtered = filtered[(lv == "") | (lv == "—") | (lv == "ignore") | (lv == "none") | (lv == "null")]
 
 qn = norm_search(q)
 if qn:
@@ -1028,10 +831,6 @@ def tag_class(color: str) -> str:
 
 
 def change_level_ru(level: str) -> tuple[str, str, str]:
-    """
-    Возвращает: (ru_label, color, extra_css_class)
-    ультракоротко: Важно / Правка / —
-    """
     lv = norm_col(level)
     if lv == "major":
         return "Важно", "red", "tag-change-major"
@@ -1041,10 +840,9 @@ def change_level_ru(level: str) -> tuple[str, str, str]:
         return "—", "gray", ""
     if not lv or lv == "—":
         return "—", "gray", ""
-    # если вдруг пишут по-русски/иначе
     if "важ" in lv:
         return "Важно", "red", "tag-change-major"
-    if "прав" in lv or "minor" in lv:
+    if "прав" in lv:
         return "Правка", "yellow", ""
     return safe_text(level, "—"), "gray", ""
 
@@ -1077,17 +875,17 @@ def render_card(row: pd.Series):
     s_cls = tag_class(accent)
     w_cls = tag_class(w_col)
 
-    # === ЧИПЫ ПОД ОТВЕТСТВЕННЫМ (из новых колонок реестра) ===
+    # чип "обновлено" (из reестр card_updated_at)
     upd_col, upd_txt = chip_date_color(row.get("card_updated_at", ""))
     upd_cls = tag_class(upd_col)
 
+    # чип "изменение" + пульсация для Важно
     ch_ru, ch_color, ch_extra = change_level_ru(row.get("change_level", ""))
     ch_cls = tag_class(ch_color)
 
     change_what = safe_text(row.get("change_what", ""), "—")
     change_note = safe_text(row.get("change_note", ""), "—")
 
-    # url + фото
     card_url = ensure_url(row.get("card_url_text", ""))
     photo_src = drive_image_url(row.get("photo_url", ""))
 
@@ -1195,7 +993,7 @@ def render_card(row: pd.Series):
 """
     )
 
-    # правая часть: ответственный + под ним два чипа в одну строку + раскрывашка
+    # правая часть: ответственный + под ним чипы и раскрывашка
     change_box = html_clean(
         f"""
 <input class="meta-toggle" type="checkbox" id="{change_toggle_id}">
