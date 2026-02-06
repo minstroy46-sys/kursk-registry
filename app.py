@@ -154,8 +154,13 @@ def try_parse_date(v) -> date | None:
         return None
 
 
-def update_color(updated_at_value) -> tuple[str, str]:
-    d = try_parse_date(updated_at_value)
+def fmt_date_compact(v) -> str:
+    d = try_parse_date(v)
+    return d.strftime("%d.%m.%Y") if d else "—"
+
+
+def chip_date_color(v) -> tuple[str, str]:
+    d = try_parse_date(v)
     if not d:
         return "gray", "—"
     days = (date.today() - d).days
@@ -280,8 +285,6 @@ def build_row_search_blob(row: pd.Series) -> str:
             safe_text(row.get("district", ""), ""),
             safe_text(row.get("status", ""), ""),
             safe_text(row.get("issues", ""), ""),
-            safe_text(row.get("change_note", ""), ""),
-            safe_text(row.get("change_what", ""), ""),
         ]
     )
     blob = norm_search(base)
@@ -361,30 +364,38 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     out["address"] = df[col("address", "адрес")] if col("address", "адрес") else ""
     out["responsible"] = df[col("responsible", "ответственный")] if col("responsible", "ответственный") else ""
     out["status"] = df[col("status", "статус")] if col("status", "статус") else ""
-
-    # works_in_progress / issues вы сказали есть
-    out["work_flag"] = df[col("works_in_progress", "work_flag", "работы")] if col("works_in_progress", "work_flag", "работы") else ""
-    out["issues"] = df[col("issues", "проблемы", "проблемные вопросы")] if col("issues", "проблемы", "проблемные вопросы") else ""
-
-    # ссылка на карточку
-    out["card_url_text"] = df[col("card_url_text", "card_url", "ссылка на карточку", "ссылка_на_карточку")] if col(
-        "card_url_text", "card_url", "ссылка на карточку", "ссылка_на_карточку"
+    out["work_flag"] = df[col("work_flag", "работы", "works_in_progress", "works")] if col(
+        "work_flag", "работы", "works_in_progress", "works"
+    ) else ""
+    out["issues"] = df[col("issues", "проблемы", "проблемные вопросы")] if col(
+        "issues", "проблемы", "проблемные вопросы"
     ) else ""
 
-    # фото (если есть)
+    # это старое "обновлено" (можно оставить для данных/поиска, но МЫ ЕГО НЕ ПОКАЗЫВАЕМ ЧИПОМ)
+    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
+        "updated_at", "last_update", "обновлено", "updated"
+    ) else ""
+
+    out["card_url_text"] = df[
+        col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
+    ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
+
     out["photo_url"] = df[col("photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото")] if col(
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
 
-    # контроль (из Apps Script)
-    out["card_updated_at"] = df[col("card_updated_at")] if col("card_updated_at") else ""
-    out["change_level"] = df[col("change_level")] if col("change_level") else ""
-    out["change_what"] = df[col("change_what")] if col("change_what") else ""
-    out["change_note"] = df[col("change_note")] if col("change_note") else ""
-
-    # “обновлено” (старое поле из реестра, если есть)
-    out["updated_at"] = df[col("updated_at", "last_update", "обновлено", "updated")] if col(
-        "updated_at", "last_update", "обновлено", "updated"
+    # === НОВОЕ: контроль изменений из реестра ===
+    out["card_updated_at"] = df[col("card_updated_at", "card_updated_drive", "card_updated")] if col(
+        "card_updated_at", "card_updated_drive", "card_updated"
+    ) else ""
+    out["change_level"] = df[col("change_level", "уровень_изменения", "значимость", "change_severity")] if col(
+        "change_level", "уровень_изменения", "значимость", "change_severity"
+    ) else ""
+    out["change_what"] = df[col("change_what", "что_изменили", "changes", "change_fields")] if col(
+        "change_what", "что_изменили", "changes", "change_fields"
+    ) else ""
+    out["change_note"] = df[col("change_note", "комментарий", "примечание", "note")] if col(
+        "change_note", "комментарий", "примечание", "note"
     ) else ""
 
     # Паспортные поля (как у вас)
@@ -486,15 +497,18 @@ html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
 }
 
-/* фикс текста на мобиле */
 html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
   color: var(--text);
 }
+p, span, li, div, small { color: var(--text); }
 .stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
-label, [data-testid="stWidgetLabel"] *{ color: var(--text) !important; opacity: 1 !important; }
+label, [data-testid="stWidgetLabel"] *{
+  color: var(--text) !important;
+  opacity: 1 !important;
+}
 h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
 
-/* inputs */
+/* FIX: Android/MIUI dark inputs (BaseWeb) */
 div[data-baseweb="input"] > div,
 div[data-baseweb="select"] > div{
   background: rgba(255,255,255,.96) !important;
@@ -508,6 +522,19 @@ div[data-baseweb="input"] input{
   caret-color: var(--text) !important;
 }
 div[data-baseweb="select"] input{
+  background: rgba(255,255,255,.96) !important;
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
+}
+div[data-baseweb="popover"],
+div[data-baseweb="menu"]{
+  background: #ffffff !important;
+  color: var(--text) !important;
+  border: 1px solid rgba(15,23,42,.14) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 18px 32px rgba(0,0,0,.14) !important;
+}
+select, input, textarea{
   background: rgba(255,255,255,.96) !important;
   color: var(--text) !important;
   -webkit-text-fill-color: var(--text) !important;
@@ -563,6 +590,13 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   border-radius: 16px;
   padding: 10px 10px 6px 10px;
   box-shadow: 0 14px 26px rgba(0,0,0,.08);
+}
+div[data-testid="stTextInput"] input,
+div[data-testid="stSelectbox"] div[role="combobox"]{
+  border: 1px solid rgba(15,23,42,.20) !important;
+  box-shadow: 0 10px 18px rgba(0,0,0,.06) !important;
+  background: rgba(255,255,255,.96) !important;
+  border-radius: 12px !important;
 }
 
 /* карточка */
@@ -623,6 +657,14 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   margin: 10px 0 14px 0;
   position: relative;
 }
+.photo-wrap:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 48%),
+              radial-gradient(900px 260px at 14% 12%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%);
+}
 .photo{
   display:block;
   width:100%;
@@ -639,7 +681,7 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
 .addr-row{ margin-top: 8px; font-size: 14px; }
 .addr-row b{ font-weight: 900; }
 
-/* строки тегов */
+/* теги + ответственный справа */
 .tags-row{
   display:flex;
   align-items:flex-start;
@@ -648,40 +690,21 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   margin-top: 12px;
   flex-wrap: wrap;
 }
-.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; align-items:center; }
-
-/* справа: ответственный + обновления под ним */
-.right-col{ display:flex; flex-direction: column; gap: 8px; align-items: flex-end; }
-.right-subrow{ display:flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-
-/* чипы */
+.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; }
 .tag{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
-  border: 1px solid var(--chip-bd);
-  background: var(--chip-bg);
+  border: 1px solid rgba(15,23,42,.10);
+  background: rgba(15,23,42,.05);
   font-size: 13px; font-weight: 800;
-  text-decoration: none !important;
-  color: var(--text) !important;
+  user-select: none;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
 .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
-.tag-link:hover{ transform: translateY(-1px); box-shadow: 0 10px 16px rgba(0,0,0,.08); }
-
-/* пульсация для "Важно" */
-@keyframes pulseGlow {
-  0%   { box-shadow: 0 0 0 rgba(239,68,68,.00); }
-  50%  { box-shadow: 0 0 0 3px rgba(239,68,68,.18); }
-  100% { box-shadow: 0 0 0 rgba(239,68,68,.00); }
-}
-.tag-pulse{
-  animation: pulseGlow 1.6s ease-in-out infinite;
-}
-
-/* ответственный */
+.resp-stack{ display:flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .resp-chip{
   display:inline-flex;
   align-items:center;
@@ -698,8 +721,47 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
 .resp-chip .muted{ font-weight: 800; color: rgba(15,23,42,.70) !important; }
 @media (max-width: 900px){
   .resp-chip{ white-space: normal; }
-  .right-col{ align-items: flex-start; }
-  .right-subrow{ justify-content: flex-start; }
+  .resp-stack{ align-items: flex-start; }
+}
+
+/* ряд под ответственным */
+.meta-row{ display:flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 900px){
+  .meta-row{ justify-content: flex-start; }
+}
+
+/* кликабельный чип "изменение" (без ссылок!) */
+.meta-toggle{ position:absolute; opacity:0; pointer-events:none; }
+.tag-click{ cursor: pointer; }
+.tag-click:active{ transform: translateY(0.5px); }
+
+/* блок деталей изменений */
+.change-box{
+  margin-top: 8px;
+  border: 1px dashed rgba(15,23,42,.18);
+  background: rgba(255,255,255,.78);
+  border-radius: 12px;
+  padding: 10px 12px;
+  width: min(520px, 92vw);
+  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+}
+.change-line{ font-size: 13.5px; line-height: 1.35; word-break: break-word; overflow-wrap:anywhere; }
+.change-line b{ font-weight: 900; }
+.change-muted{ color: rgba(15,23,42,.70) !important; }
+
+/* показываем change-box только если toggle включён */
+.meta-toggle:not(:checked) ~ .change-box{ display:none; }
+.meta-toggle:checked ~ .change-box{ display:block; }
+
+/* пульсация для ВАЖНО */
+@keyframes pulseGlow {
+  0%   { box-shadow: 0 0 0 rgba(239,68,68,.0), 0 10px 18px rgba(0,0,0,.06); }
+  50%  { box-shadow: 0 0 10px rgba(239,68,68,.30), 0 10px 18px rgba(0,0,0,.06); }
+  100% { box-shadow: 0 0 0 rgba(239,68,68,.0), 0 10px 18px rgba(0,0,0,.06); }
+}
+.tag-change-major{
+  border-color: rgba(239,68,68,.30) !important;
+  animation: pulseGlow 1.8s ease-in-out infinite;
 }
 
 /* кнопка */
@@ -708,14 +770,14 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   display:flex; justify-content:center; align-items:center; gap: 8px;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid var(--btn-bd);
-  background: var(--btn-bg);
+  border: 1px solid rgba(15,23,42,.18);
+  background: rgba(255,255,255,.96);
   text-decoration:none !important;
   font-weight: 900;
   font-size: 14px;
   transition: .12s ease-in-out;
   margin-top: 14px;
-  box-shadow: 0 10px 18px var(--btn-shadow);
+  box-shadow: 0 10px 18px rgba(0,0,0,.08);
 }
 .a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
 .a-btn.disabled{ opacity: .45; pointer-events:none; }
@@ -724,8 +786,8 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
 .passport{
   margin-top: 14px;
   border-radius: 14px;
-  border: 1px solid var(--border-strong);
-  background: var(--soft2);
+  border: 1px solid rgba(15,23,42,.20);
+  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,255,.98));
   overflow: hidden;
   box-shadow: 0 10px 18px rgba(0,0,0,.06);
 }
@@ -741,7 +803,6 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
 }
 .passport-summary:before{ content: "▸"; font-weight: 900; opacity: .7; }
 .passport-toggle:checked + .passport-summary:before{ content: "▾"; }
-
 .passport-body{
   display: none;
   padding: 12px 12px 14px 12px;
@@ -760,9 +821,10 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   padding: 12px;
   border-radius: 14px;
   border: 1px solid rgba(15,23,42,.12);
-  background: var(--soft);
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(245,248,255,.98));
 }
 .section-title{ font-weight: 900; margin-bottom: 8px; font-size: 14px; }
+
 .row{
   display:flex;
   gap: 10px;
@@ -773,7 +835,7 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   overflow-wrap: anywhere;
 }
 .row b{ font-weight: 900; }
-.row .muted{ color: var(--muted) !important; }
+.row .muted{ color: rgba(15,23,42,.70) !important; }
 
 .issue-box{
   border: 1px solid rgba(239,68,68,.22);
@@ -786,15 +848,22 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   overflow-wrap: anywhere;
 }
 
-.passport-close{ display: none; justify-content:center; margin: 10px 0 12px 0; }
+.passport-close{
+  display: none;
+  justify-content:center;
+  margin: 10px 0 12px 0;
+}
 .passport-toggle:checked ~ .passport-close{ display:flex; }
 .passport-close-btn{
-  width: 34px; height: 34px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   border: 1px solid rgba(15,23,42,.18);
   background: rgba(255,255,255,.92);
   font-weight: 900;
-  display:flex; align-items:center; justify-content:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   line-height: 1;
   transition: .12s ease-in-out;
   cursor: pointer;
@@ -802,17 +871,6 @@ div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   box-shadow: 0 10px 18px rgba(0,0,0,.08);
 }
 .passport-close-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
-
-.change-note{
-  margin-top: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px dashed rgba(15,23,42,.18);
-  background: rgba(255,255,255,.86);
-  font-size: 13.5px;
-  line-height: 1.35;
-  box-shadow: 0 10px 18px rgba(0,0,0,.05);
-}
 
 @media (max-width: 900px){
   .card-title{ font-size: 18px; }
@@ -844,7 +902,7 @@ st.markdown(
       <div class="hero-titles">
         <div class="hero-ministry">Министерство восстановления, развития приграничья и строительства Курской области</div>
         <div class="hero-app">Реестр объектов</div>
-        <div class="hero-sub">Единый список объектов 2025–2028 с фильтрами, переходом в карточку и контролем изменений.</div>
+        <div class="hero-sub">Единый список объектов 2025–2028 с быстрыми фильтрами и переходом в карточку.</div>
       </div>
     </div>
   </div>
@@ -901,11 +959,6 @@ if raw.empty:
     st.stop()
 
 df = normalize_schema(raw)
-
-# query param для раскрытия "что изменили"
-qp = st.query_params
-selected_change_id = qp.get("chg", None)
-
 df["search_blob"] = df.apply(build_row_search_blob, axis=1)
 
 sectors = sorted([x for x in df["sector"].unique().tolist() if str(x).strip()])
@@ -920,9 +973,9 @@ statuses = ["Все"] + statuses
 
 
 # =============================
-# FILTERS + SEARCH + CHANGE FILTER
+# FILTERS + SEARCH
 # =============================
-c1, c2, c3, c4, c5 = st.columns([1.0, 1.0, 1.0, 1.0, 1.35])
+c1, c2, c3, c4 = st.columns([1.0, 1.0, 1.0, 1.35])
 with c1:
     sector_sel = st.selectbox("🏷️ Отрасль", sectors, index=0, key="f_sector")
 with c2:
@@ -930,8 +983,6 @@ with c2:
 with c3:
     status_sel = st.selectbox("📌 Статус", statuses, index=0, key="f_status")
 with c4:
-    ch_filter = st.selectbox("⚡ Изменения", ["Все", "Важно", "Правка", "Без изменений"], index=0, key="f_change")
-with c5:
     q = st.text_input("🔎 Поиск", value="", key="f_search", placeholder="").strip()
 
 
@@ -946,19 +997,6 @@ if district_sel != "Все":
     filtered = filtered[filtered["district"].astype(str) == str(district_sel)]
 if status_sel != "Все":
     filtered = filtered[filtered["status"].astype(str) == str(status_sel)]
-
-# фильтр по change_level
-def norm_lvl(x: str) -> str:
-    x = safe_text(x, fallback="").strip().lower()
-    return x
-
-if ch_filter != "Все":
-    if ch_filter == "Важно":
-        filtered = filtered[filtered["change_level"].apply(lambda x: norm_lvl(x) == "major")]
-    elif ch_filter == "Правка":
-        filtered = filtered[filtered["change_level"].apply(lambda x: norm_lvl(x) == "minor")]
-    elif ch_filter == "Без изменений":
-        filtered = filtered[filtered["change_level"].apply(lambda x: norm_lvl(x) in ("", "ignore"))]
 
 qn = norm_search(q)
 if qn:
@@ -989,6 +1027,28 @@ def tag_class(color: str) -> str:
     return "tag-gray"
 
 
+def change_level_ru(level: str) -> tuple[str, str, str]:
+    """
+    Возвращает: (ru_label, color, extra_css_class)
+    ультракоротко: Важно / Правка / —
+    """
+    lv = norm_col(level)
+    if lv == "major":
+        return "Важно", "red", "tag-change-major"
+    if lv == "minor":
+        return "Правка", "yellow", ""
+    if lv == "ignore":
+        return "—", "gray", ""
+    if not lv or lv == "—":
+        return "—", "gray", ""
+    # если вдруг пишут по-русски/иначе
+    if "важ" in lv:
+        return "Важно", "red", "tag-change-major"
+    if "прав" in lv or "minor" in lv:
+        return "Правка", "yellow", ""
+    return safe_text(level, "—"), "gray", ""
+
+
 def kv_html(label: str, value) -> str:
     return html_clean(f'<div class="row"><b>{esc(label)}:</b> {esc(value)}</div>')
 
@@ -996,20 +1056,6 @@ def kv_html(label: str, value) -> str:
 def section_html(title: str, inner_html: str, wide: bool = False) -> str:
     cls = "section section-wide" if wide else "section"
     return html_clean(f'<div class="{cls}"><div class="section-title">{esc(title)}</div>{inner_html}</div>')
-
-
-def change_chip_meta(level_raw: str) -> tuple[str, str, bool]:
-    """
-    returns: (label_ru_short, css_class, pulse)
-    """
-    lv = safe_text(level_raw, fallback="").strip().lower()
-    if lv == "major":
-        return "Важно", "tag-red tag-pulse", True
-    if lv == "minor":
-        return "Правка", "tag-yellow", False
-    if lv == "ignore":
-        return "—", "tag-gray", False
-    return "—", "tag-gray", False
 
 
 def render_card(row: pd.Series):
@@ -1025,24 +1071,23 @@ def render_card(row: pd.Series):
     work_flag = safe_text(row.get("work_flag", ""), "—")
     issues = safe_text(row.get("issues", ""), "—")
 
-    # статус/работы/обновлено (старое)
-    u_col, u_txt = update_color(row.get("updated_at", ""))
-
     accent = status_accent(status)
     w_col = works_color(work_flag)
 
     s_cls = tag_class(accent)
     w_cls = tag_class(w_col)
-    u_cls = tag_class(u_col)
 
-    # контроль из Apps Script
-    card_updated_txt = date_fmt(row.get("card_updated_at", ""))
-    ch_label, ch_cls, _ = change_chip_meta(row.get("change_level", ""))
+    # === ЧИПЫ ПОД ОТВЕТСТВЕННЫМ (из новых колонок реестра) ===
+    upd_col, upd_txt = chip_date_color(row.get("card_updated_at", ""))
+    upd_cls = tag_class(upd_col)
 
-    change_note = safe_text(row.get("change_note", ""), "")
-    change_what = safe_text(row.get("change_what", ""), "")
-    note_text = change_note if change_note and change_note != "—" else change_what
+    ch_ru, ch_color, ch_extra = change_level_ru(row.get("change_level", ""))
+    ch_cls = tag_class(ch_color)
 
+    change_what = safe_text(row.get("change_what", ""), "—")
+    change_note = safe_text(row.get("change_note", ""), "—")
+
+    # url + фото
     card_url = ensure_url(row.get("card_url_text", ""))
     photo_src = drive_image_url(row.get("photo_url", ""))
 
@@ -1128,43 +1173,52 @@ def render_card(row: pd.Series):
     rid = safe_text(row.get("id", ""), fallback="").strip()
     if not rid:
         rid = f"row_{abs(hash(title_txt))}"
-    rid_safe = re.sub(r"[^a-zA-Z0-9_]+", "_", rid)
-    toggle_id = f"passport_{rid_safe}"
+    rid = re.sub(r"[^a-zA-Z0-9_]+", "_", rid)
+
+    passport_toggle_id = f"passport_{rid}"
+    change_toggle_id = f"change_{rid}"
 
     passport_html = html_clean(
         f"""
 <div class="passport">
-  <input class="passport-toggle" type="checkbox" id="{toggle_id}">
-  <label class="passport-summary" for="{toggle_id}">📋 Паспорт объекта и контрольные показатели</label>
+  <input class="passport-toggle" type="checkbox" id="{passport_toggle_id}">
+  <label class="passport-summary" for="{passport_toggle_id}">📋 Паспорт объекта и контрольные показатели</label>
   <div class="passport-body">
     <div class="passport-grid">
       {''.join(passport_blocks)}
     </div>
   </div>
   <div class="passport-close">
-    <label class="passport-close-btn" for="{toggle_id}" title="Свернуть">▴</label>
+    <label class="passport-close-btn" for="{passport_toggle_id}" title="Свернуть">▴</label>
   </div>
 </div>
 """
     )
 
-    # справа: ответственный + под ним (в одну строку) обновлено/изменение
+    # правая часть: ответственный + под ним два чипа в одну строку + раскрывашка
+    change_box = html_clean(
+        f"""
+<input class="meta-toggle" type="checkbox" id="{change_toggle_id}">
+<div class="meta-row">
+  <span class="tag {upd_cls}">🕒 Обновлено: {esc(upd_txt)}</span>
+  <label class="tag {ch_cls} {ch_extra} tag-click" for="{change_toggle_id}">⚡ Изменение: {esc(ch_ru)}</label>
+</div>
+<div class="change-box">
+  <div class="change-line"><b>Что изменили:</b> {esc(change_what)}</div>
+  <div class="change-line" style="margin-top:6px;"><b>Комментарий:</b> {esc(change_note)}</div>
+  <div class="change-line change-muted" style="margin-top:8px;">Нажмите ещё раз на «Изменение», чтобы свернуть.</div>
+</div>
+"""
+    )
+
     resp_html = html_clean(
         f"""
-<div class="right-col">
+<div class="resp-stack">
   <span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>
-  <div class="right-subrow">
-    <span class="tag tag-green">🕒 Обновлено: {esc(card_updated_txt)}</span>
-    <a class="tag tag-link {esc(ch_cls)}" href="?chg={esc(rid_safe)}">⚡ Изменение: {esc(ch_label)}</a>
-  </div>
+  {change_box}
 </div>
 """
     )
-
-    # раскрытие "что изменили" по клику на чип
-    note_html = ""
-    if selected_change_id and str(selected_change_id) == str(rid_safe) and note_text and note_text != "—":
-        note_html = html_clean(f'<div class="change-note"><b>Что изменили:</b> {esc(note_text)}</div>')
 
     card_html = html_clean(
         f"""
@@ -1184,12 +1238,9 @@ def render_card(row: pd.Series):
     <div class="tags-left">
       <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
       <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
-      <span class="tag {u_cls}">⏱️ Обновлено (реестр): {esc(u_txt)}</span>
     </div>
     {resp_html}
   </div>
-
-  {note_html}
 
   {btn_html}
   {passport_html}
