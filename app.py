@@ -166,6 +166,24 @@ def update_color(updated_at_value) -> tuple[str, str]:
     return "red", d.strftime("%d.%m.%Y")
 
 
+def change_level_badge(v) -> tuple[str, str, str]:
+    """
+    Возвращает:
+      - color (для tag_class)
+      - label text (что писать в чип)
+      - pulse_class (доп. класс для пульсации, только для major)
+    """
+    s_raw = safe_text(v, fallback="—")
+    s = norm_col(s_raw)
+    if s in ("major", "мажор", "существенное", "значимое"):
+        return "red", "major", "pulse-major"
+    if s in ("minor", "минор", "незначительное", "незначимое"):
+        return "yellow", "minor", ""
+    if s in ("ignore", "игнор", "", "—", "none", "null"):
+        return "gray", "—", ""
+    return "blue", s_raw, ""
+
+
 def money_fmt(v) -> str:
     s = safe_text(v, fallback="—")
     if s == "—":
@@ -212,8 +230,6 @@ def norm_search(s: str) -> str:
     return s
 
 
-# --- КЛЮЧ: убираем лидирующие пробелы у каждой строки HTML,
-# чтобы Streamlit не превращал в Markdown-code block
 def html_clean(s: str) -> str:
     if s is None:
         return ""
@@ -221,7 +237,6 @@ def html_clean(s: str) -> str:
     return "\n".join([ln.lstrip() for ln in lines]).strip()
 
 
-# --- Фото: Google Drive link -> прямая картинка
 def extract_drive_file_id(url: str) -> str:
     u = safe_text(url, fallback="").strip()
     if not u:
@@ -239,7 +254,6 @@ def drive_image_url(url: str, width: int = 1200) -> str:
     fid = extract_drive_file_id(url)
     if not fid:
         return ""
-    # thumbnail обычно работает стабильнее для картинок
     return f"https://drive.google.com/thumbnail?id={fid}&sz=w{int(width)}"
 
 
@@ -377,12 +391,19 @@ def normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку")
     ] if col("card_url_text", "card_url", "ссылка_на_карточку_(google)", "ссылка на карточку", "ссылка_на_карточку") else ""
 
-    # --- ФОТО
     out["photo_url"] = df[col("photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото")] if col(
         "photo_url", "photo", "фото", "ссылка_на_фото", "ссылка на фото"
     ) else ""
 
-    # Паспортные поля
+    # Apps Script пишет сюда:
+    out["card_updated_drive"] = df[col("card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки")] if col(
+        "card_updated_drive", "card_updated_at", "обновлено_карточка", "дата обновления карточки"
+    ) else ""
+    out["change_level"] = df[col("change_level", "уровень_изменения", "значимость", "change_severity")] if col(
+        "change_level", "уровень_изменения", "значимость", "change_severity"
+    ) else ""
+
+    # Паспортные поля (как у вас)
     out["state_program"] = df[col("state_program", "гп", "государственная программа")] if col(
         "state_program", "гп", "государственная программа"
     ) else ""
@@ -480,17 +501,37 @@ header {visibility: hidden;}
 html, body, [data-testid="stAppViewContainer"]{
   background: var(--page) !important;
 }
-
 html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] *{
   color: var(--text);
 }
-p, span, li, div, small { color: var(--text); }
 .stCaption, [data-testid="stCaptionContainer"] * { color: var(--muted) !important; }
 label, [data-testid="stWidgetLabel"] *{
   color: var(--text) !important;
   opacity: 1 !important;
 }
-h1,h2,h3,h4,h5,h6{
+h1,h2,h3,h4,h5,h6{ color: var(--text) !important; }
+
+/* FIX: Android/MIUI dark inputs (BaseWeb) */
+div[data-baseweb="input"] > div,
+div[data-baseweb="select"] > div{
+  background: rgba(255,255,255,.96) !important;
+  color: var(--text) !important;
+  border-color: rgba(15,23,42,.20) !important;
+}
+div[data-baseweb="input"] input{
+  background: rgba(255,255,255,.96) !important;
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
+  caret-color: var(--text) !important;
+}
+div[data-baseweb="select"] input{
+  background: rgba(255,255,255,.96) !important;
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
+}
+div[data-baseweb="select"] svg,
+div[data-baseweb="input"] svg{
+  fill: var(--text) !important;
   color: var(--text) !important;
 }
 
@@ -537,7 +578,7 @@ h1,h2,h3,h4,h5,h6{
   .hero-row{ align-items:center; }
 }
 
-/* Виджеты фильтров/поиска/пароля */
+/* панельки фильтров */
 div[data-testid="stSelectbox"], div[data-testid="stTextInput"]{
   background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(245,248,255,.94));
   border: 1px solid rgba(15,23,42,.16);
@@ -553,7 +594,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border-radius: 12px !important;
 }
 
-/* Карточка */
+/* карточка */
 .card{
   background:
     radial-gradient(900px 320px at 14% 12%, rgba(59,130,246,.08), rgba(0,0,0,0) 55%),
@@ -566,7 +607,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   margin-bottom: 14px;
   position: relative;
 }
-
 .card[data-accent="green"]{
   border-color: rgba(34,197,94,.35);
   box-shadow: 0 10px 22px var(--shadow),
@@ -591,58 +631,125 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
               inset 12px 0 0 rgba(59,130,246,.52),
               0 0 18px rgba(59,130,246,.10);
 }
-
-.card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; color: var(--text) !important; }
+.card-title{ font-size: 20px; line-height: 1.15; font-weight: 900; margin: 0 0 10px 0; }
 .card-subchips{ display:flex; gap: 8px; flex-wrap: wrap; margin-top: -2px; margin-bottom: 12px; }
-
 .chip{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px; color: var(--text) !important;
-  font-weight: 800;
+  font-size: 13px; font-weight: 800;
 }
 
-/* ФОТО В КАРТОЧКЕ */
+/* фото */
 .photo-wrap{
   width: 100%;
   border-radius: 14px;
   border: 1px solid rgba(15,23,42,.12);
-  background: rgba(255,255,255,.85);
+  background: rgba(255,255,255,.88);
   overflow: hidden;
-  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+  box-shadow: 0 12px 22px rgba(0,0,0,.08);
   margin: 10px 0 14px 0;
+  position: relative;
+}
+.photo-wrap:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 48%),
+              radial-gradient(900px 260px at 14% 12%, rgba(59,130,246,.10), rgba(0,0,0,0) 55%);
 }
 .photo{
   display:block;
   width:100%;
   height:auto;
-  aspect-ratio: 16 / 9;    /* фиксируем, чтобы ничего не "плыло" */
+  aspect-ratio: 16 / 9;
   object-fit: cover;
+  max-height: 280px;
 }
 @media (max-width: 900px){
-  .photo{ aspect-ratio: 4 / 3; }
+  .photo{ aspect-ratio: 4 / 3; max-height: 220px; }
 }
 
-.card-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin-top: 8px; }
-.card-item{ font-size: 14px; color: var(--text) !important; }
-.card-item b{ color: var(--text) !important; }
+/* адрес */
+.addr-row{ margin-top: 8px; font-size: 14px; }
+.addr-row b{ font-weight: 900; }
 
-.card-tags{ display:flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+/* теги + ответственный справа */
+.tags-row{
+  display:flex;
+  align-items:flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.tags-left{ display:flex; gap: 10px; flex-wrap: wrap; align-items:center; }
+
 .tag{
   display:inline-flex; align-items:center; gap: 8px;
   padding: 6px 10px; border-radius: 999px;
   border: 1px solid var(--chip-bd);
   background: var(--chip-bg);
-  font-size: 13px; color: var(--text) !important; font-weight: 800;
+  font-size: 13px; font-weight: 800;
 }
 .tag-gray{ opacity: .92; }
 .tag-green{ background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.22); }
 .tag-yellow{ background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.25); }
 .tag-red{ background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.22); }
 
-/* Кнопка открыть карточку */
+.resp-wrap{
+  display:flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 240px;
+}
+@media (max-width: 900px){
+  .resp-wrap{ align-items:flex-start; min-width: auto; width: 100%; }
+}
+
+.resp-chip{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(15,23,42,.12);
+  background: rgba(255,255,255,.86);
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 10px 18px rgba(0,0,0,.06);
+  white-space: nowrap;
+}
+.resp-chip .muted{ font-weight: 800; color: rgba(15,23,42,.70) !important; }
+@media (max-width: 900px){
+  .resp-chip{ white-space: normal; }
+}
+
+/* строка чипов обновления под ответственным */
+.right-meta{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 900px){
+  .right-meta{ justify-content:flex-start; }
+}
+
+/* пульсация только у major */
+@keyframes majorPulse {
+  0%   { box-shadow: 0 0 0 rgba(239,68,68,0.0); }
+  50%  { box-shadow: 0 0 0 3px rgba(239,68,68,0.18); }
+  100% { box-shadow: 0 0 0 rgba(239,68,68,0.0); }
+}
+.pulse-major{
+  animation: majorPulse 1.6s ease-in-out infinite;
+}
+
+/* кнопка */
 .a-btn{
   width: 100%;
   display:flex; justify-content:center; align-items:center; gap: 8px;
@@ -651,7 +758,6 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border: 1px solid var(--btn-bd);
   background: var(--btn-bg);
   text-decoration:none !important;
-  color: var(--text) !important;
   font-weight: 900;
   font-size: 14px;
   transition: .12s ease-in-out;
@@ -661,7 +767,7 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
 .a-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
 .a-btn.disabled{ opacity: .45; pointer-events:none; }
 
-/* Паспорт */
+/* паспорт */
 .passport{
   margin-top: 14px;
   border-radius: 14px;
@@ -670,43 +776,32 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   overflow: hidden;
   box-shadow: 0 10px 18px rgba(0,0,0,.06);
 }
-.passport-toggle{
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
+.passport-toggle{ position: absolute; opacity: 0; pointer-events: none; }
 .passport-summary{
   cursor: pointer;
   padding: 12px 12px;
   font-weight: 900;
-  color: var(--text) !important;
   display:flex;
   align-items:center;
   gap: 10px;
   user-select: none;
 }
-.passport-summary:before{
-  content: "▸";
-  font-weight: 900;
-  opacity: .7;
-}
-.passport-toggle:checked + .passport-summary:before{
-  content: "▾";
-}
+.passport-summary:before{ content: "▸"; font-weight: 900; opacity: .7; }
+.passport-toggle:checked + .passport-summary:before{ content: "▾"; }
 .passport-body{
   display: none;
   padding: 12px 12px 14px 12px;
   border-top: 1px dashed rgba(15,23,42,.12);
 }
-.passport-toggle:checked ~ .passport-body{
-  display: block;
-}
+.passport-toggle:checked ~ .passport-body{ display: block; }
+
 .passport-grid{
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 .section-wide{ grid-column: 1 / -1; }
+
 .section{
   margin-top: 0;
   padding: 12px;
@@ -714,23 +809,23 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   border: 1px solid rgba(15,23,42,.12);
   background: var(--soft);
 }
-.section-title{ font-weight: 900; color: var(--text) !important; margin-bottom: 8px; font-size: 14px; }
+.section-title{ font-weight: 900; margin-bottom: 8px; font-size: 14px; }
+
 .row{
   display:flex;
   gap: 10px;
   flex-wrap: wrap;
-  color: var(--text) !important;
   font-size: 13.5px;
   line-height: 1.35;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
-.row b{ color: var(--text) !important; }
+.row b{ font-weight: 900; }
 .row .muted{ color: var(--muted) !important; }
+
 .issue-box{
   border: 1px solid rgba(239,68,68,.22);
   background: rgba(239,68,68,.07);
-  color: var(--text) !important;
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 13.5px;
@@ -738,21 +833,19 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
 .passport-close{
   display: none;
   justify-content:center;
   margin: 10px 0 12px 0;
 }
-.passport-toggle:checked ~ .passport-close{
-  display:flex;
-}
+.passport-toggle:checked ~ .passport-close{ display:flex; }
 .passport-close-btn{
   width: 34px;
   height: 34px;
   border-radius: 999px;
   border: 1px solid rgba(15,23,42,.18);
   background: rgba(255,255,255,.92);
-  color: var(--text) !important;
   font-weight: 900;
   display:flex;
   align-items:center;
@@ -763,13 +856,9 @@ div[data-testid="stSelectbox"] div[role="combobox"]{
   user-select: none;
   box-shadow: 0 10px 18px rgba(0,0,0,.08);
 }
-.passport-close-btn:hover{
-  transform: translateY(-1px);
-  box-shadow: 0 14px 22px rgba(0,0,0,.10);
-}
+.passport-close-btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 22px rgba(0,0,0,.10); }
 
 @media (max-width: 900px){
-  .card-grid{ grid-template-columns: 1fr; }
   .card-title{ font-size: 18px; }
   .passport-grid{ grid-template-columns: 1fr; }
 }
@@ -912,7 +1001,7 @@ st.divider()
 
 
 # =============================
-# CARD RENDER (HTML)
+# CARD RENDER
 # =============================
 def tag_class(color: str) -> str:
     if color == "green":
@@ -936,25 +1025,33 @@ def section_html(title: str, inner_html: str, wide: bool = False) -> str:
 def render_card(row: pd.Series):
     title_txt = safe_text(row.get("name", "Объект"))
     title = esc(title_txt)
+
     sector = esc(row.get("sector", "—"))
     district = esc(row.get("district", "—"))
     address = esc(row.get("address", "—"))
-    responsible = esc(row.get("responsible", "—"))
+    responsible = safe_text(row.get("responsible", ""), "—")
 
     status = safe_text(row.get("status", ""), "—")
     work_flag = safe_text(row.get("work_flag", ""), "—")
     issues = safe_text(row.get("issues", ""), "—")
 
+    # Обновлено (по полю card_updated_at из реестра)
+    upd_color, upd_txt = update_color(row.get("card_updated_drive", ""))
+
+    # Изменение (major/minor/—)
+    ch_color, ch_label, ch_pulse = change_level_badge(row.get("change_level", ""))
+
     accent = status_accent(status)
     w_col = works_color(work_flag)
-    u_col, u_txt = update_color(row.get("updated_at", ""))
 
     s_cls = tag_class(accent)
     w_cls = tag_class(w_col)
-    u_cls = tag_class(u_col)
+
+    upd_cls = tag_class(upd_color)
+    ch_cls = tag_class(ch_color)
 
     card_url = ensure_url(row.get("card_url_text", ""))
-    photo_src = drive_image_url(row.get("photo_url", ""))  # <-- ФОТО
+    photo_src = drive_image_url(row.get("photo_url", ""))
 
     btn_html = html_clean(
         f'<a class="a-btn" href="{esc(card_url)}" target="_blank" rel="noopener noreferrer">📄 Открыть карточку</a>'
@@ -1058,6 +1155,19 @@ def render_card(row: pd.Series):
 """
     )
 
+    # Правая колонка: ответственный + (под ним) 2 чипа в одну строку
+    right_html = html_clean(
+        f"""
+<div class="resp-wrap">
+  <span class="resp-chip"><span class="muted">👤 Ответственный:</span> {esc(responsible)}</span>
+  <div class="right-meta">
+    <span class="tag {upd_cls}">⏱️ Обновлено: {esc(upd_txt)}</span>
+    <span class="tag {ch_cls} {esc(ch_pulse)}">⚡ Изменение: {esc(ch_label)}</span>
+  </div>
+</div>
+"""
+    )
+
     card_html = html_clean(
         f"""
 <div class="card" data-accent="{esc(accent)}">
@@ -1070,15 +1180,14 @@ def render_card(row: pd.Series):
 
   {photo_html}
 
-  <div class="card-grid">
-    <div class="card-item">🗺️ <b>Адрес:</b> {address}</div>
-    <div class="card-item">👤 <b>Ответственный:</b> {responsible}</div>
-  </div>
+  <div class="addr-row">🗺️ <b>Адрес:</b> {address}</div>
 
-  <div class="card-tags">
-    <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
-    <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
-    <span class="tag {u_cls}">⏱️ Обновлено: {esc(u_txt)}</span>
+  <div class="tags-row">
+    <div class="tags-left">
+      <span class="tag {s_cls}">📌 Статус: {esc(status)}</span>
+      <span class="tag {w_cls}">🛠️ Работы: {esc(work_flag)}</span>
+    </div>
+    {right_html}
   </div>
 
   {btn_html}
